@@ -83,3 +83,23 @@ Neo4j: Connected
 ## 8. Performance Evaluation
 
 *To be completed.*
+
+## 9. Citations and External Resources
+
+### Redis Python Client
+
+**Source:** Redis. "redis-py guide (Python)."  
+https://redis.io/docs/latest/develop/clients/redis-py/
+
+**What we learned:** How to connect to Redis and execute Redis commands through Python using the `redis-py` library, including `set()`, `get()`, `hset()`, and `hgetall()`.
+
+**How we adapted it:** We used these operations in `schema/redis_store.py` to implement user sessions, shopping cart caching, recently viewed products, and inventory caching. As we already knew how to do this in the command line, it was relatively simple mapping this onto what we already knew.
+
+### Redis Pipelines
+
+**Source:** Redis. "Pipelines and transactions."  
+https://redis.io/docs/latest/develop/clients/redis-py/transpipe/
+
+**What we learned:** How to batch Redis commands using Python pipelines and execute them together.
+
+**How we adapted it:** We used a transactional pipeline when saving sessions to set session fields and expiration together.
