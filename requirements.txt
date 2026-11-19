@@ -1,5 +1,5 @@
 # MySQL
-mysql-connector-python==9.6.0
+mysql-connector-python==9.7.0
 
 # MongoDB
 pymongo==4.20.0
