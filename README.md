@@ -103,3 +103,14 @@ https://redis.io/docs/latest/develop/clients/redis-py/transpipe/
 **What we learned:** How to batch Redis commands using Python pipelines and execute them together.
 
 **How we adapted it:** We used a transactional pipeline when saving sessions to set session fields and expiration together.
+
+### Neo4j Constraints and Indexes
+
+**Sources:**
+- Neo4j. "Create Constraints." https://neo4j.com/docs/cypher-manual/5/constraints/create-constraints/
+- Neo4j. "Search-Performance Indexes." https://neo4j.com/docs/cypher-manual/5/indexes/search-performance-indexes/
+
+**What we learned:** How to create uniqueness constraints and indexes in Neo4j using Cypher, including `CREATE CONSTRAINT`, `CREATE INDEX`, and `IF NOT EXISTS`. We also learned that uniqueness constraints automatically create supporting indexes.
+
+**How we adapted it:** We applied uniqueness constraints to `user_id`, `order_id`, `product_id`, and `category_id` in `schema/neo4j.cypher` to maintain consistent identifiers across databases. We added an index on category names to support efficient lookups. We avoided redundant indexes because uniqueness constraints already provide them. This was all done in the cypher file in the schema directory.
+
