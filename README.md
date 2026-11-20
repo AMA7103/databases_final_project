@@ -126,7 +126,13 @@ Data is inserted in batches using consistent identifiers across databases. Neo4j
 
 ## 8. Data Validation
 
-*To be completed.*
+Validate dataset sizes, Sarah's history, and consistency across all four databases:
+
+```bash
+python src/validate.py
+```
+
+The script reports PASS, FAIL, or WARN for each check. A successful validation finishes with zero failures. Expired Redis caches may produce warnings.
 
 ## 9. Citations and External Resources
 

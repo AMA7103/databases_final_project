@@ -4,10 +4,10 @@ from datetime import datetime, timezone
 
 
 # Expiration times in seconds
-SESSION_TTL = 86400
-CART_TTL = 86400
+SESSION_TTL = 604800
+CART_TTL = 604800
 RECENT_TTL = 2592000
-STOCK_TTL = 60
+STOCK_TTL = 86400
 RECENT_LIMIT = 50
 
 
