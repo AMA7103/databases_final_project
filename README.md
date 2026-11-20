@@ -95,7 +95,15 @@ python src/sync.py views
 
 ## 5. Data Generation
 
-*To be completed.*
+Generate synthetic data for all four databases:
+
+```bash
+python src/generate.py
+```
+
+This creates 10,000 users, 5,000 products, 100,000 orders, and 500,000 behavior events, including Sarah's required history.
+
+Generated files are saved in `data/`. The generator uses a fixed random seed and shared identifiers across databases.
 
 ## 6. Data Loading
 
