@@ -127,9 +127,8 @@ https://redis.io/docs/latest/develop/clients/redis-py/transpipe/
 - MongoDB. "Write Scripts." https://www.mongodb.com/docs/mongodb-shell/write-scripts/
 - MongoDB. "Specify JSON Schema Validation." https://www.mongodb.com/docs/manual/core/schema-validation/specify-json-schema/
 - MongoDB. "Modify Schema Validation." https://www.mongodb.com/docs/manual/core/schema-validation/update-schema-validation/
-- MongoDB. "Create an Index." https://www.mongodb.com/docs/v8.0/core/indexes/create-index/
 
-**What we learned:** How to write and execute JavaScript scripts using `mongosh`, define document validation rules with `$jsonSchema`, update existing collection validators using `collMod`, and create indexes using `createIndex()`.
+**What we learned:** How to write and execute JavaScript scripts using `mongosh`, define document validation rules with `$jsonSchema`, and update existing collection validators using `collMod`.
 
 **How we adapted it:** We used these techniques in `schema/mongodb.js` to initialize the `product_attributes` and `events` collections. We defined required fields and data types while allowing flexible category-specific product attributes. We also created unique and compound indexes to support product lookups, browsing history, search history, and product view counts.
 
