@@ -60,7 +60,6 @@ Redis: Connected
 Neo4j: Connected
 ```
 
-
 ## 3. Schema Initialization
 
 Initialize MySQL tables, MongoDB collections, and Neo4j constraints and indexes:
@@ -107,7 +106,19 @@ Generated files are saved in `data/`. The generator uses a fixed random seed and
 
 ## 6. Data Loading
 
-*To be completed.*
+Load the generated dataset into MySQL, MongoDB, Neo4j, and Redis:
+
+```bash
+python src/load.py
+```
+
+To clear existing project data and reload:
+
+```bash
+python src/load.py --reset
+```
+
+Data is inserted in batches using consistent identifiers across databases. Neo4j relationships and Redis caches are derived from the generated data.
 
 ## 7. Running Queries
 
@@ -117,11 +128,7 @@ Generated files are saved in `data/`. The generator uses a fixed random seed and
 
 *To be completed.*
 
-## 9. Performance Evaluation
-
-*To be completed.*
-
-## 10. Citations and External Resources
+## 9. Citations and External Resources
 
 ### Redis Python Client
 
