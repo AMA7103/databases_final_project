@@ -71,27 +71,49 @@ python src/setup.py
 
 Redis requires no schema initialization. The setup script also verifies connections to all four databases.
 
-## 4. Data Generation
+## 4. Database Synchronization
+
+MySQL uses a transactional outbox to synchronize orders, products, carts, and inventory changes with Redis and Neo4j.
+
+Process pending updates:
+
+```bash
+python src/sync.py
+```
+
+Continuously synchronize updates:
+
+```bash
+python src/sync.py watch
+```
+
+Synchronize MongoDB product views into Neo4j:
+
+```bash
+python src/sync.py views
+```
+
+## 5. Data Generation
 
 *To be completed.*
 
-## 5. Data Loading
+## 6. Data Loading
 
 *To be completed.*
 
-## 6. Running Queries
+## 7. Running Queries
 
 *To be completed.*
 
-## 7. Data Validation
+## 8. Data Validation
 
 *To be completed.*
 
-## 8. Performance Evaluation
+## 9. Performance Evaluation
 
 *To be completed.*
 
-## 9. Citations and External Resources
+## 10. Citations and External Resources
 
 ### Redis Python Client
 
