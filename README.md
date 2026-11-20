@@ -60,9 +60,16 @@ Redis: Connected
 Neo4j: Connected
 ```
 
+
 ## 3. Schema Initialization
 
-*To be completed.*
+Initialize MySQL tables, MongoDB collections, and Neo4j constraints and indexes:
+
+```bash
+python src/setup.py
+```
+
+Redis requires no schema initialization. The setup script also verifies connections to all four databases.
 
 ## 4. Data Generation
 
@@ -113,4 +120,16 @@ https://redis.io/docs/latest/develop/clients/redis-py/transpipe/
 **What we learned:** How to create uniqueness constraints and indexes in Neo4j using Cypher, including `CREATE CONSTRAINT`, `CREATE INDEX`, and `IF NOT EXISTS`. We also learned that uniqueness constraints automatically create supporting indexes.
 
 **How we adapted it:** We applied uniqueness constraints to `user_id`, `order_id`, `product_id`, and `category_id` in `schema/neo4j.cypher` to maintain consistent identifiers across databases. We added an index on category names to support efficient lookups. We avoided redundant indexes because uniqueness constraints already provide them. This was all done in the cypher file in the schema directory.
+
+### MongoDB JavaScript Scripting, Schema Validation, and Indexes
+
+**Sources:**
+- MongoDB. "Write Scripts." https://www.mongodb.com/docs/mongodb-shell/write-scripts/
+- MongoDB. "Specify JSON Schema Validation." https://www.mongodb.com/docs/manual/core/schema-validation/specify-json-schema/
+- MongoDB. "Modify Schema Validation." https://www.mongodb.com/docs/manual/core/schema-validation/update-schema-validation/
+- MongoDB. "Create an Index." https://www.mongodb.com/docs/v8.0/core/indexes/create-index/
+
+**What we learned:** How to write and execute JavaScript scripts using `mongosh`, define document validation rules with `$jsonSchema`, update existing collection validators using `collMod`, and create indexes using `createIndex()`.
+
+**How we adapted it:** We used these techniques in `schema/mongodb.js` to initialize the `product_attributes` and `events` collections. We defined required fields and data types while allowing flexible category-specific product attributes. We also created unique and compound indexes to support product lookups, browsing history, search history, and product view counts.
 
