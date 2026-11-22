@@ -122,7 +122,22 @@ Data is inserted in batches using consistent identifiers across databases. Neo4j
 
 ## 7. Running Queries
 
-*To be completed.*
+All 13 queries are in `queries/queries.py` as functions `q1(c)` to `q13(c)`. 
+
+To run all of them:
+
+```bash
+python queries/run_queries.py
+```
+
+To run one query, and add `--show` to print its result:
+
+```bash
+python queries/run_queries.py 5
+python queries/run_queries.py 5 --show
+```
+
+Runtimes and execution plans are in `submission/performance_evaluation.md`.
 
 ## 8. Data Validation
 
@@ -175,3 +190,39 @@ https://redis.io/docs/latest/develop/clients/redis-py/transpipe/
 
 **How we adapted it:** We used these techniques in `schema/mongodb.js` to initialize the `product_attributes` and `events` collections. We defined required fields and data types while allowing flexible category-specific product attributes. We also created unique and compound indexes to support product lookups, browsing history, search history, and product view counts.
 
+### Python Timing and Median
+
+**Sources:**
+- Python Software Foundation. "time — Time access and conversions." https://docs.python.org/3/library/time.html#time.perf_counter
+
+**What we learned:** How to use `time.perf_counter()` to measure short durations up to fractions of seconds.
+
+**How we adapted it:** In `queries/run_queries.py`, we read `perf_counter()` before and after each query call, run each query 3 times, and report the median of the 3 runtimes.
+
+### Redis ZREVRANGEBYSCORE
+
+**Source:** Redis. "ZREVRANGEBYSCORE." https://redis.io/docs/latest/commands/zrevrangebyscore/
+
+**What we learned:** How to return the members of a sorted set whose scores fall between a maximum and a minimum using `ZREVRANGEBYSCORE`, ordered from highest to lowest score. The page lists the command as deprecated as of Redis 6.2.0, but it still works on the Redis 7.4 we use.
+
+**How we adapted it:** In query 2 in `queries/queries.py` we call `zrevrangebyscore` on a user's `recent:<user_id>` sorted set. The scores are timestamps so the minimum score is the six-month cutoff.
+
+
+### Neo4j PROFILE
+
+**Source:** Neo4j. "Understanding query plans." https://neo4j.com/docs/cypher-manual/5/planning-and-tuning/execution-plans/
+
+**What we learned:** How to show a query plan with `EXPLAIN` and `PROFILE`. `EXPLAIN` provides an estimate without running and `PROFILE` runs the query and shows real measurements for each operator, including rows produced and database hits. The plan is read from the bottom up.
+
+**How we adapted it:** We ran `PROFILE` on the Neo4j query (Query 12) in `cypher-shell` and recorded the output in `submission/performance_evaluation.md`.
+
+### MongoDB explain
+
+**Sources:**
+- MongoDB. "cursor.explain()." https://www.mongodb.com/docs/manual/reference/method/cursor.explain/
+- MongoDB. "explain (database command)." https://www.mongodb.com/docs/manual/reference/command/explain/
+- MongoDB. "Explain Results." https://www.mongodb.com/docs/manual/reference/explain-results/
+
+**What we learned:** How to use `explain` to get the query plan. It has three verbosity modes: `queryPlanner`, `executionStats` and `allPlansExecution`. `executionStats` runs the winning plan and returns its statistics, including `nReturned`, `totalKeysExamined` and `totalDocsExamined`, so we can compare documents examined against documents returned.
+
+**How we adapted it:** We ran the `explain` command with `executionStats` verbosity on the MongoDB calls in Queries 1, 2, 5 and 6 and recorded the output in `submission/performance_evaluation.md`.
