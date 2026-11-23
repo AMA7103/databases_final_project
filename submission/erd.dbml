@@ -1,0 +1,172 @@
+// E-commerce platform: relational schema (MySQL 8.0)
+// Paste into https://dbdiagram.io (crow's foot notation), then Export -> PNG.
+// Mirrors schema/mysql.sql exactly.
+
+Project ecommerce {
+  database_type: 'MySQL'
+}
+
+Table users {
+  user_id "bigint unsigned" [pk, increment]
+  full_name varchar(150) [not null]
+  email varchar(255) [not null, unique]
+  created_at datetime(6) [not null]
+}
+
+Table addresses {
+  address_id "bigint unsigned" [pk, increment]
+  user_id "bigint unsigned" [not null]
+  recipient_name varchar(150) [not null]
+  line1 varchar(255) [not null]
+  line2 varchar(255)
+  city varchar(100) [not null]
+  region varchar(100)
+  postal_code varchar(20) [not null]
+  country_code char(2) [not null]
+}
+
+Table categories {
+  category_id "bigint unsigned" [pk, increment]
+  name varchar(100) [not null]
+  slug varchar(100) [not null, unique]
+}
+
+Table products {
+  product_id "bigint unsigned" [pk, increment]
+  category_id "bigint unsigned" [not null]
+  name varchar(200) [not null]
+  description text
+  base_price decimal(10,2) [not null]
+  return_allowed boolean [not null]
+  return_window_days "smallint unsigned" [not null]
+  restocking_fee_percent decimal(5,2) [not null]
+  is_active boolean [not null]
+  created_at datetime(6) [not null]
+}
+
+Table product_variants {
+  variant_id "bigint unsigned" [pk, increment]
+  product_id "bigint unsigned" [not null]
+  sku varchar(100) [not null, unique]
+  size varchar(50)
+  color varchar(80)
+  price decimal(10,2) [not null]
+  stock_quantity "int unsigned" [not null]
+  is_active boolean [not null]
+}
+
+Table carts {
+  cart_id "bigint unsigned" [pk, increment]
+  user_id "bigint unsigned" [not null]
+  status "enum('active','converted','abandoned')" [not null]
+  last_device varchar(50)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+}
+
+Table cart_items {
+  cart_id "bigint unsigned" [pk]
+  variant_id "bigint unsigned" [pk]
+  quantity "int unsigned" [not null]
+  added_at datetime(6) [not null]
+}
+
+Table shipping_options {
+  shipping_option_id "bigint unsigned" [pk, increment]
+  name varchar(100) [not null, unique]
+  base_cost decimal(10,2) [not null]
+  min_delivery_days "smallint unsigned" [not null]
+  max_delivery_days "smallint unsigned" [not null]
+  is_active boolean [not null]
+}
+
+Table orders {
+  order_id "bigint unsigned" [pk, increment]
+  user_id "bigint unsigned" [not null]
+  cart_id "bigint unsigned" [not null, unique]
+  shipping_address_id "bigint unsigned" [not null]
+  billing_address_id "bigint unsigned"
+  shipping_option_id "bigint unsigned" [not null]
+  status "enum('placed','paid','processing','shipped','delivered','cancelled')" [not null]
+  placed_at datetime(6) [not null]
+  subtotal decimal(12,2) [not null]
+  tax_amount decimal(12,2) [not null]
+  shipping_amount decimal(12,2) [not null]
+  total_amount decimal(12,2) [not null]
+  expected_ship_date date
+  expected_delivery_date date
+  shipped_at datetime(6)
+  delivered_at datetime(6)
+  tracking_number varchar(120)
+}
+
+Table order_items {
+  order_item_id "bigint unsigned" [pk, increment]
+  order_id "bigint unsigned" [not null]
+  variant_id "bigint unsigned" [not null]
+  product_name_snapshot varchar(200) [not null]
+  quantity "int unsigned" [not null]
+  unit_price decimal(10,2) [not null]
+}
+
+Table payments {
+  payment_id "bigint unsigned" [pk, increment]
+  order_id "bigint unsigned" [not null]
+  method_type "enum('credit_card','bank_account')" [not null]
+  provider varchar(100) [not null]
+  provider_token varchar(255)
+  provider_transaction_id varchar(255) [unique]
+  status "enum('pending','approved','failed','refunded','partially_refunded')" [not null]
+  amount decimal(12,2) [not null]
+  created_at datetime(6) [not null]
+  paid_at datetime(6)
+}
+
+Table returns {
+  return_id "bigint unsigned" [pk, increment]
+  order_item_id "bigint unsigned" [not null]
+  quantity "int unsigned" [not null]
+  resolution "enum('refund','exchange')" [not null]
+  exchange_variant_id "bigint unsigned"
+  status "enum('requested','label_issued','in_transit','received','completed','rejected')" [not null]
+  refund_status "enum('not_applicable','pending','processed','failed')" [not null]
+  exchange_status "enum('not_applicable','pending','shipped','completed','failed')" [not null]
+  refund_amount decimal(12,2) [not null]
+  restocking_fee decimal(12,2) [not null]
+  return_shipping_method varchar(100)
+  return_tracking_number varchar(120)
+  return_label_url varchar(500)
+  requested_at datetime(6) [not null]
+  completed_at datetime(6)
+}
+
+Table outbox_events {
+  event_id "bigint unsigned" [pk, increment]
+  event_type varchar(100) [not null]
+  entity_type varchar(50) [not null]
+  entity_id "bigint unsigned" [not null]
+  payload json [not null]
+  created_at datetime(6) [not null]
+  processed_at datetime(6)
+  attempts "int unsigned" [not null]
+  last_error text
+  Note: 'No foreign keys: entity_id refers to a cart, variant, product or order depending on entity_type.'
+}
+
+// Relationships (">" = many-to-one, "-" = one-to-one)
+Ref: addresses.user_id > users.user_id
+Ref: products.category_id > categories.category_id
+Ref: product_variants.product_id > products.product_id
+Ref: carts.user_id > users.user_id
+Ref: cart_items.cart_id > carts.cart_id [delete: cascade]
+Ref: cart_items.variant_id > product_variants.variant_id
+Ref: orders.user_id > users.user_id
+Ref: orders.cart_id - carts.cart_id
+Ref: orders.shipping_address_id > addresses.address_id
+Ref: orders.billing_address_id > addresses.address_id
+Ref: orders.shipping_option_id > shipping_options.shipping_option_id
+Ref: order_items.order_id > orders.order_id
+Ref: order_items.variant_id > product_variants.variant_id
+Ref: payments.order_id > orders.order_id
+Ref: returns.order_item_id > order_items.order_item_id
+Ref: returns.exchange_variant_id > product_variants.variant_id
