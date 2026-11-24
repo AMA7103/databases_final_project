@@ -226,3 +226,10 @@ https://redis.io/docs/latest/develop/clients/redis-py/transpipe/
 **What we learned:** How to use `explain` to get the query plan. It has three verbosity modes: `queryPlanner`, `executionStats` and `allPlansExecution`. `executionStats` runs the winning plan and returns its statistics, including `nReturned`, `totalKeysExamined` and `totalDocsExamined`, so we can compare documents examined against documents returned.
 
 **How we adapted it:** We ran the `explain` command with `executionStats` verbosity on the MongoDB calls in Queries 1, 2, 5 and 6 and recorded the output in `submission/performance_evaluation.md`.
+
+## 10. Contributions
+
+- Everyone contributed to database design and schema decisions.
+- Anuj Agarwal wrote the initial schema code and the data generation and loading scripts.
+- Neal Jere completed the Part 1 write-up, ERD, and supporting diagrams and explanations.
+- Jaden Lee wrote the queries and completed the performance evaluation.
