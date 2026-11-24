@@ -132,7 +132,7 @@ Behavior data is high-volume, append-only and varied, so it lives in MongoDB, se
 
 ### What an event looks like
 
-All events share a common core (`event_id`, `user_id`, `session_id`, `event_type`, `occurred_at`, `device`), and each type adds only the fields it needs. A schema validator enforces the core fields and allows six event types: `product_view`, `product_click`, `search`, `cart_add`, `cart_remove` and `cart_update`.
+The schema validator requires `event_id`, `user_id`, `event_type`, and `occurred_at`. Events can also include `session_id` and `device`, whose types are checked when present. Each event type adds the fields it needs, and the validator allows six types: `product_view`, `product_click`, `search`, `cart_add`, `cart_remove` and `cart_update`.
 
 Example JSON:
 
@@ -184,7 +184,7 @@ A graph database stores relationships directly, making it convenient to follow s
 ### Design Choices
 
 - **Orders are their own nodes.** Users link to orders, and orders link to products, rather than users linking straight to products. That lets the graph tell whether two products were bought in the same order, which co-purchase analysis needs.
-- **Variants are stored on the `CONTAINS` relationship.** The size or color bought is a property there instead of a separate node, which keeps the graph smaller. Recommendations work at the product level, so variant nodes aren't needed.
+- **Variants are referenced on the `CONTAINS` relationship.** The purchased variant's `variant_id` is stored there instead of creating a separate node; its size and color remain in MySQL. Recommendations work at the product level, so variant nodes aren't needed.
 - **Views are summarized.** Each user and product pair has a single `VIEWED` relationship holding a view count, instead of one relationship per view, so 500,000 raw events don't flood the graph.
 
 ### Implementation

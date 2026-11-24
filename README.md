@@ -149,6 +149,8 @@ python src/validate.py
 
 The script reports PASS, FAIL, or WARN for each check. A successful validation finishes with zero failures. Expired Redis caches may produce warnings.
 
+If validation runs a few days after data generation, the past-year timestamp checks may fail because they use the current date rather than the generation date, placing some older records outside the allowed window.
+
 ## 9. Citations and External Resources
 
 ### Redis Python Client

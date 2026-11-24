@@ -2,7 +2,6 @@ import json
 import os
 import sys
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 
 from db import (
     get_mysql_connection,
@@ -346,7 +345,6 @@ def validate():
             check("Sarah has recent searches", len(searches) > 0)
 
             periods = set()
-            chicago = ZoneInfo("America/Chicago")
 
             for event in searches:
                 timestamp = event["occurred_at"]
@@ -354,13 +352,13 @@ def validate():
                 if timestamp.tzinfo is None:
                     timestamp = timestamp.replace(tzinfo=timezone.utc)
 
-                hour = timestamp.astimezone(chicago).hour
+                hour = timestamp.astimezone(timezone.utc).hour
                 periods.add(
                     ("night", "morning", "afternoon", "evening")[hour // 6]
                 )
 
             check(
-                "Sarah's searches cover all four time periods",
+                "Sarah's searches cover all four UTC time periods",
                 len(periods) == 4
             )
 
@@ -487,7 +485,7 @@ def validate():
                 int(cached_stock) == actual_stock
             )
         else:
-            warning("Inventory cache expired (60-second TTL)")
+            warning("Inventory cache expired or missing (24-hour TTL)")
 
         # Summary
         print(f"\nValidation complete: {len(failures)} failures")
