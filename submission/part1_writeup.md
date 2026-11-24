@@ -72,7 +72,7 @@ At the same time, the cart is tied to the user, not to the session or device, wh
 
 Our schema denormalizes product names into order items. In a fully normalized design, an order item would store only its `variant_id`, and showing the product's name would require joining `order_items` to `product_variants` and then to `products`. Instead, when an order is placed, the product's name is copied into `order_items.product_name_snapshot`. Order history and returns are viewed often and always display product names, so keeping the name next to the order item avoids those extra joins. The copy also acts like a receipt. In the case that a product is renamed later, past orders still show the name the customer saw when they bought it.
 
-- Reads: pages that show past orders, like order history (Task 8) and returns (Task 9), can read the product name straight from `order_items` without looking it up in `products`. Also, both tasks run in under 1 ms.
+- Reads: pages that show past orders, like order history (Task 8) and returns (Task 9), can read the product name straight from `order_items` without looking it up in `products`. Their measured medians are 1.160 ms for Task 8 and 0.664 ms for Task 9.
 - Writes: one extra column is written per order item at checkout. The name is written once and never updated, so the cost is negligible.
 - Consistency: the copy can differ from the current catalog name. That is intended for historical records if the product name changes. The current name is still available through `variant_id` when needed.
 - Storage: each order item carries a short string  of up to 200 characters. Across the generated data this adds only a few megabytes, which is small compared to the joins it saves.
@@ -86,13 +86,13 @@ Data flow diagram:
 
 MySQL and MongoDB are the sources of truth as they are directly written too. Redis and Neo4j only hold derived data meaning that they are filled from MySQL through the outbox worker and from MongoDB through a periodic batch job. However, sessions and recently viewed items are the exception, since the application writes them straight to Redis. Decisions about money and stock are always made in MySQL, so a short delay in the derived stores never affects correctness.
 
-| Data | How it gets there | Expected freshness | Read latency (measured) |
+| Data | How it gets there | Expected freshness | Task runtime (median of 3 runs) |
 |---|---|---|---|
-| Orders, stock, carts, payments, returns (MySQL) | Written directly in transactions | Immediate | Under 1 ms for single user queries (Tasks 8–10) |
-| Behavior events (MongoDB) | Written as each interaction happens | Real time, however analytics can tolerate a few seconds of delay | 0.6 ms (Task 6) to 69 ms (Task 5) |
-| Sessions, recently viewed (Redis) | Written directly by the application | Real time | About 1 ms (Task 2) |
+| Orders, stock, carts, payments, returns (MySQL) | Written directly in transactions | Immediate | 1.160 ms (Task 8), 0.664 ms (Task 9), 0.597 ms (Task 10) |
+| Behavior events (MongoDB) | Written as each interaction happens | Real time, however analytics can tolerate a few seconds of delay | 0.494 ms (Task 6) and 56.899 ms (Task 5, including MySQL and application code) |
+| Sessions, recently viewed (Redis) | Written directly by the application | Real time | 1.063 ms (Task 2, including MySQL and application code) |
 | Cart cache, stock counter (Redis) | Outbox worker, polling every second | About 1–2 seconds behind MySQL | Not measured but should be single-key lookups |
-| Products and orders graph (Neo4j) | Outbox worker | About 1–2 seconds behind MySQL | 126 ms (Task 12) |
+| Products and orders graph (Neo4j) | Outbox worker | About 1–2 seconds behind MySQL | 62.667 ms (Task 12) |
 | VIEWED relationships (Neo4j) | Periodic batch from MongoDB | Minutes to hours, depending on how often the batch runs. | Not measured separately |
 
 
@@ -147,8 +147,8 @@ A search event would carry `search_term` instead of `product_id` and `duration_m
 | Index | Used for |
 |---|---|
 | `event_id` (unique) | Prevents duplicate events if one is sent twice |
-| `(user_id, event_type, occurred_at)` | One user's recent views or searches e.g. Sarah's searches in the last 30 days (Task 6, 0.6 ms) |
-| `(event_type, product_id)` | View counts per product across all users (Task 5, 69 ms over 500,000 events) |
+| `(user_id, event_type, occurred_at)` | One user's recent views or searches e.g. Sarah's searches in the last 30 days (Task 6, 0.494 ms) |
+| `(event_type, product_id)` | View counts per product across all users (Task 5, 56.899 ms over 500,000 events, including MySQL and application code) |
 
 ### Scalability
 
