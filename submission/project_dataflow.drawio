@@ -1,0 +1,75 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Page-1" id="es2BJRcCyM6nlj0CmDou">
+    <mxGraphModel dx="1153" dy="642" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="t7wqSl_EjxQQRjsphbB6-15" edge="1" parent="1" source="t7wqSl_EjxQQRjsphbB6-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="t7wqSl_EjxQQRjsphbB6-2" value="transactions,&lt;div&gt;outbox rows&lt;/div&gt;">
+          <mxGeometry relative="1" x="0.0278" y="7" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="t7wqSl_EjxQQRjsphbB6-16" edge="1" parent="1" source="t7wqSl_EjxQQRjsphbB6-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="t7wqSl_EjxQQRjsphbB6-3" value="behavior events">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="t7wqSl_EjxQQRjsphbB6-1" parent="1" style="whiteSpace=wrap;html=1;" value="Application" vertex="1">
+          <mxGeometry height="70" width="120" x="30" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="t7wqSl_EjxQQRjsphbB6-18" edge="1" parent="1" source="t7wqSl_EjxQQRjsphbB6-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="t7wqSl_EjxQQRjsphbB6-12" value="outbox_events">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="t7wqSl_EjxQQRjsphbB6-2" parent="1" style="shape=datastore;whiteSpace=wrap;html=1;" value="MySQL (users, catalog, variants + stock, carts, orders, returns, and outbox events)&lt;span style=&quot;color: rgb(204, 204, 204); font-family: -apple-system, &amp;quot;system-ui&amp;quot;, sans-serif; font-size: 13px; white-space: break-spaces;&quot;&gt;)&lt;/span&gt;" vertex="1">
+          <mxGeometry height="100" width="180" x="279" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="t7wqSl_EjxQQRjsphbB6-17" edge="1" parent="1" source="t7wqSl_EjxQQRjsphbB6-3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="t7wqSl_EjxQQRjsphbB6-13" value="product_view events">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="t7wqSl_EjxQQRjsphbB6-3" parent="1" style="shape=datastore;whiteSpace=wrap;html=1;" value="MongoDB (events, product_attributes)" vertex="1">
+          <mxGeometry height="70" width="180" x="279" y="260" as="geometry" />
+        </mxCell>
+        <mxCell id="t7wqSl_EjxQQRjsphbB6-5" parent="1" style="swimlane;" value="Sources of Truth" vertex="1">
+          <mxGeometry height="320" width="215" x="264" y="70" as="geometry" />
+        </mxCell>
+        <mxCell id="t7wqSl_EjxQQRjsphbB6-6" parent="1" style="shape=datastore;whiteSpace=wrap;html=1;" value="Redis (sessions, cart cache, recent views, stock counter)" vertex="1">
+          <mxGeometry height="100" width="180" x="936" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="t7wqSl_EjxQQRjsphbB6-7" parent="1" style="shape=datastore;whiteSpace=wrap;html=1;" value="Neo4j (User, Order, Product, and category)" vertex="1">
+          <mxGeometry height="70" width="180" x="936" y="260" as="geometry" />
+        </mxCell>
+        <mxCell id="t7wqSl_EjxQQRjsphbB6-8" parent="1" style="swimlane;" value="Derived Stores" vertex="1">
+          <mxGeometry height="320" width="215" x="921" y="70" as="geometry" />
+        </mxCell>
+        <mxCell id="t7wqSl_EjxQQRjsphbB6-19" edge="1" parent="1" source="t7wqSl_EjxQQRjsphbB6-12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="t7wqSl_EjxQQRjsphbB6-6" value="rebuild cart,&lt;div&gt;delete stale stock keys&lt;/div&gt;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="t7wqSl_EjxQQRjsphbB6-21" edge="1" parent="1" source="t7wqSl_EjxQQRjsphbB6-12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="t7wqSl_EjxQQRjsphbB6-7" value="MERGE product, orders">
+          <mxGeometry relative="1" x="-0.1989" as="geometry">
+            <Array as="points">
+              <mxPoint x="770" y="170" />
+              <mxPoint x="770" y="230" />
+              <mxPoint x="1026" y="230" />
+            </Array>
+            <mxPoint x="1008" y="260" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="t7wqSl_EjxQQRjsphbB6-12" parent="1" style="whiteSpace=wrap;html=1;" value="sync.py (outbox worker) polls every second" vertex="1">
+          <mxGeometry height="70" width="120" x="634" y="135" as="geometry" />
+        </mxCell>
+        <mxCell id="t7wqSl_EjxQQRjsphbB6-22" edge="1" parent="1" source="t7wqSl_EjxQQRjsphbB6-13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="t7wqSl_EjxQQRjsphbB6-7" value="VIEWED (view_count,&amp;nbsp;&lt;div&gt;last_viewed_at)&lt;/div&gt;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="t7wqSl_EjxQQRjsphbB6-13" parent="1" style="whiteSpace=wrap;html=1;" value="sync.py (views periodic batch)" vertex="1">
+          <mxGeometry height="70" width="120" x="636" y="260" as="geometry" />
+        </mxCell>
+        <mxCell id="t7wqSl_EjxQQRjsphbB6-14" edge="1" parent="1" source="t7wqSl_EjxQQRjsphbB6-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.536;entryY=-0.002;entryDx=0;entryDy=0;entryPerimeter=0;" target="t7wqSl_EjxQQRjsphbB6-8" value="sessions, recent views">
+          <mxGeometry relative="1" x="0.0004" as="geometry">
+            <Array as="points">
+              <mxPoint x="90" y="40" />
+              <mxPoint x="1036.2" y="40" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
