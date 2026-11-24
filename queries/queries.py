@@ -1,6 +1,6 @@
 import os
 import sys
-import time
+from calendar import monthrange
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -91,7 +91,12 @@ def q1(c):
 # MySQL + Mongo + Redis
 def q2(c):
     # Query Redis first
-    cutoff = time.time() - 182 * 24 * 60 * 60
+    now = datetime.now(timezone.utc)
+    year, month_index = divmod(now.year * 12 + now.month - 1 - 6, 12)
+    month = month_index + 1
+    cutoff = now.replace(
+        year=year, month=month, day=min(now.day, monthrange(year, month)[1])
+    ).timestamp()
     viewed = c["redis"].zrevrangebyscore(
         f"recent:{SARAH_USER_ID}", "+inf", cutoff, start=0, num=5, withscores=True
     )
@@ -299,7 +304,15 @@ def q8(c):
             i.quantity, i.unit_price
         FROM orders o
         JOIN shipping_options s ON s.shipping_option_id = o.shipping_option_id
-        JOIN payments pay ON pay.order_id = o.order_id
+        LEFT JOIN payments pay ON pay.payment_id = (
+            SELECT candidate.payment_id
+            FROM payments candidate
+            WHERE candidate.order_id = o.order_id
+            ORDER BY
+                (candidate.status IN ('approved', 'refunded', 'partially_refunded')) DESC,
+                candidate.created_at DESC, candidate.payment_id DESC
+            LIMIT 1
+        )
         JOIN order_items i ON i.order_id = o.order_id
         JOIN product_variants v ON v.variant_id = i.variant_id
         WHERE o.user_id = %s
@@ -398,16 +411,17 @@ def q11(c):
 
 # 12. Find the 3 products most frequently purchased in the same order as products in the "headphones" category.
 # Neo4j
-# Note 1: Excludes items with "headphones" category
+# Note 1: Excludes cancelled orders and the anchor product itself, not its category
 # Note 2: Ties are broken by product_id
 def q12(c):
     with c["neo4j"].session(database=os.getenv("NEO4J_DATABASE", "neo4j")) as session:
         result = session.run(
             """
-            MATCH (:Category {name: 'Headphones'})<-[:IN_CATEGORY]-(:Product)<-[:CONTAINS]-(o:Order)
-            WITH DISTINCT o
+            MATCH (:Category {name: 'Headphones'})<-[:IN_CATEGORY]-(headphones:Product)<-[:CONTAINS]-(o:Order)
+            WHERE o.status <> 'cancelled'
+            WITH DISTINCT o, headphones
             MATCH (o)-[:CONTAINS]->(other:Product)
-            WHERE NOT (other)-[:IN_CATEGORY]->(:Category {name: 'Headphones'})
+            WHERE other.product_id <> headphones.product_id
             RETURN other.product_id AS product_id, other.name AS name,
                 count(DISTINCT o) AS orders_together
             ORDER BY orders_together DESC, product_id
@@ -419,16 +433,17 @@ def q12(c):
 
 # 13. For each user, compute the number of days since their last purchase and their total number of orders.
 # MySQL
-# Note 1: Excludes cancelled orders
+# Note 1: Counts all orders; excludes cancelled orders only from the last purchase
 def q13(c):
     cur = c["mysql"].cursor(dictionary=True)
     cur.execute(
         """
         SELECT u.user_id, u.full_name,
             COUNT(o.order_id) AS total_orders,
-            DATEDIFF(NOW(), MAX(o.placed_at)) AS days_since_last_purchase
+            DATEDIFF(NOW(), MAX(CASE WHEN o.status <> 'cancelled'
+                THEN o.placed_at END)) AS days_since_last_purchase
         FROM users u
-        LEFT JOIN orders o ON o.user_id = u.user_id AND o.status <> 'cancelled'
+        LEFT JOIN orders o ON o.user_id = u.user_id
         GROUP BY u.user_id, u.full_name
         ORDER BY u.user_id
         """

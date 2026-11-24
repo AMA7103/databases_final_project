@@ -1,85 +1,380 @@
 # Performance Evaluation
 
-
-## Instructions:
-Run all 13 tasks from Part 2 against your full dataset. For each task, record:
-
-- the runtime, as the median of 3 runs (for tasks that span several stores, the total time including your application code), and
-- the execution plan, where the store provides one (for example, EXPLAIN in MySQL or explain() in MongoDB).
-
-Each task should finish within 2 seconds. If a task takes longer, identify the bottleneck and propose or implement an optimization, such as an index, a denormalization, or a cache, and report the runtime again after the change.
-
 ## Results
 
-All 13 queries were run against the full generated dataset. For queries that use more than one store, the time covers every database call plus the application code that combines the results. Opening the database connections is not included.
+Measured at 2026-11-24T02:14:22.961048+00:00. Dataset counts were checked before timing: 10,000 users, 5,000 products, 100,000 orders, 500,000 events.
 
-| # | Task | Stores | Median (ms) | Rows returned | Within 2 s |
-|---|---|---|---|---|---|
-| 1 | Fashion products with attributes | MySQL, MongoDB | 33.0 | 625 | Yes |
-| 2 | Sarah's last 5 viewed products (6 months) | Redis, MySQL (MongoDB fallback) | 1.1 | 5 | Yes |
-| 3 | Variants with stock under 5 | MySQL | 3.4 | 1,579 | Yes |
-| 4 | Fashion products in blue or size Large | MySQL | 12.4 | 625 | Yes |
-| 5 | Page-view count per product | MongoDB, MySQL | 69.2 | 5,000 | Yes |
-| 6 | Sarah's search terms (30 days) by frequency and time of day | MongoDB | 0.6 | 4 | Yes |
-| 7 | Active carts: device, item count, total | MySQL | 25.1 | 3,647 | Yes |
-| 8 | Sarah's orders with items, payment, shipping, status | MySQL | 0.9 | 13 | Yes |
-| 9 | Sarah's returns | MySQL | 0.7 | 2 | Yes |
-| 10 | Average days between Sarah's purchases | MySQL | 0.6 | 1 | Yes |
-| 11 | % of carts (30 days) never converted | MySQL | 11.5 | 1 | Yes |
-| 12 | Top 3 products bought with headphones | Neo4j | 126.1 | 3 | Yes |
-| 13 | Days since last purchase and order count, per user | MySQL | 92.6 | 10,000 | Yes |
+Each task was executed three times sequentially using `time.perf_counter()`, without a separate warm-up. Timings include fetching all results and application-side combination, grouping, and sorting. Connection creation, dataset-count checks, execution-plan collection, and result formatting are excluded. Lightweight query recording was enabled to capture the exact statements used. Plans were collected separately after each task’s three timed runs.
+
+| # | Task | Stores | Run 1 (ms) | Run 2 (ms) | Run 3 (ms) | Median (ms) | Rows returned | Within 2 s |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Fashion products with attributes | MySQL, MongoDB | 22.885 | 31.756 | 22.191 | 22.885 | 625 | Yes |
+| 2 | Sarah's last 5 viewed products (6 months) | Redis, MySQL (MongoDB fallback) | 2.335 | 1.063 | 0.984 | 1.063 | 5 | Yes |
+| 3 | Variants with stock under 5 | MySQL | 3.598 | 3.179 | 3.384 | 3.384 | 1,579 | Yes |
+| 4 | Fashion products in blue or size Large | MySQL | 12.548 | 11.657 | 11.991 | 11.991 | 625 | Yes |
+| 5 | Page-view count per product | MongoDB, MySQL | 58.321 | 54.596 | 56.899 | 56.899 | 5,000 | Yes |
+| 6 | Sarah's search terms (30 days) by frequency and time of day | MongoDB | 0.792 | 0.494 | 0.473 | 0.494 | 4 | Yes |
+| 7 | Active carts: device, item count, total | MySQL | 31.051 | 23.821 | 26.487 | 26.487 | 3,647 | Yes |
+| 8 | Sarah's orders with items, payment, shipping, status | MySQL | 1.274 | 1.160 | 0.964 | 1.160 | 13 | Yes |
+| 9 | Sarah's returns | MySQL | 0.822 | 0.664 | 0.658 | 0.664 | 2 | Yes |
+| 10 | Average days between Sarah's purchases | MySQL | 0.688 | 0.597 | 0.564 | 0.597 | 1 | Yes |
+| 11 | % of carts (30 days) never converted | MySQL | 10.496 | 9.993 | 10.237 | 10.237 | 1 | Yes |
+| 12 | Top 3 products bought with headphones | Neo4j | 235.025 | 62.667 | 43.653 | 62.667 | 3 | Yes |
+| 13 | Days since last purchase and order count, per user | MySQL | 85.689 | 82.304 | 83.893 | 83.893 | 10,000 | Yes |
+
+All medians are below 2,000 ms; no threshold-triggered optimization or second benchmark was necessary. The query corrections address semantics rather than a measured performance bottleneck.
 
 ## Assumptions
 
-- **Query 4**
-  - assumes "blue" means JUST blue, not blue-variants like "aqua-blue"
-  - assumes "available" means inventory (stock_quantity) > 0
-- **Query 6**
-  - time-of-day periods are by UTC since event times are stored in UTC
-- **Query 10**
-  - Excludes cancelled orders
-- **Query 11**
-  - Assumes currently-open carts count as "never converted to an order."
-- **Query 12**
-  - Excludes items with "headphones" category
-  - Ties are broken by product_id
-- **Query 13**
-  - Excludes cancelled orders
+- **Query 2:** Returns the five most recently viewed distinct products within six calendar months in UTC. Month-end dates are clamped to the last valid day of the target month. Redis and the MongoDB fallback use the same cutoff. These measured runs used Redis and MySQL; the MongoDB fallback was not exercised.
+- **Query 4:** Blue means exactly `blue`; available means positive stock and active product and variant.
+- **Query 6:** Time-of-day periods use UTC.
+- **Query 7:** Item count sums quantities; the cart total is the merchandise subtotal at current variant prices, before checkout tax and shipping.
+- **Query 8:** Selects one payment attempt per order: an approved/refunded/partially-refunded attempt takes priority, then the latest `created_at` and highest `payment_id`. If no successful attempt exists, the latest attempt is used. Orders without a payment remain visible with a null payment method. This prevents multiple payment attempts from duplicating order items.
+- **Query 10:** Excludes cancelled orders.
+- **Query 11:** Currently open carts without an order count as not converted as of measurement time.
+- **Query 12:** Excludes cancelled orders. Counts distinct orders containing a headphones product and a different product; the other product may itself be headphones. Ties are broken by `product_id`.
+- **Query 13:** Total orders includes cancelled orders; days since last purchase excludes cancelled orders. Users with no qualifying purchase have a null days-since value.
 
-## Execution plans
+## Queries, answers, and execution plans
 
-For each query I described in words what it does and provided the raw output of the execution plan. Below are the functions I used to get the execution plans:
+Answers below come from the third timed run. Tasks with at most 13 returned records show the complete answer; larger outputs show the first three records in query order and the full record count. Nested variant and item lists in displayed records are complete. Monetary decimals and timestamps are rendered as strings to preserve their values; MySQL timestamps are UTC by project convention.
 
-- **MySQL:** `EXPLAIN`, run in the `mysql` client.
-- **MongoDB:** the `explain` command with `executionStats` verbosity, as returned by the server. The only change is that arrays of more than 10 items (long product-id lists) are cut off with `... N more`.
-- **Neo4j:** `PROFILE`, run in `cypher-shell`.
-- **Redis:** has no explain or query planner, so there is no plan to show.
+MySQL plans use `EXPLAIN` with the executed SQL and parameters. MongoDB plans use `explain` with `executionStats`. Neo4j uses `PROFILE`, which executes a separate plan-collection run outside the three timed runs. Redis has no execution planner. Long arrays in plan output are shortened after ten elements and explicitly marked; execution counters are unchanged. MongoDB server metadata is omitted.
 
 ### Query 1: Fashion products with attributes
 
-MySQL finds the fashion category using the unique `slug` index, then reads its products with `idx_products_category` and their variants with `idx_variants_product`. No table is scanned. The filesort is just the `ORDER BY`. MongoDB then looks up those product ids in `product_attributes` using the `product_id` index, and every document it gets is returned.
+MySQL retrieves fashion products and variants; MongoDB supplies category-specific attributes. Python groups variants and attaches the documents by shared product_id.
 
 <details>
-<summary>Raw MySQL EXPLAIN</summary>
+<summary>Results: 625 records; first three records shown.</summary>
 
-```sql
-EXPLAIN SELECT p.product_id, p.name, p.base_price, v.variant_id, v.size, v.color, v.price, v.stock_quantity FROM products p JOIN categories c ON c.category_id = p.category_id JOIN product_variants v ON v.product_id = p.product_id WHERE c.slug = 'fashion' ORDER BY p.product_id, v.variant_id;
-```
-
-```
-+----+-------------+-------+------------+-------+-------------------------------+-----------------------+---------+------------------------+------+----------+----------------------------------------------+
-| id | select_type | table | partitions | type  | possible_keys                 | key                   | key_len | ref                    | rows | filtered | Extra                                        |
-+----+-------------+-------+------------+-------+-------------------------------+-----------------------+---------+------------------------+------+----------+----------------------------------------------+
-|  1 | SIMPLE      | c     | NULL       | const | PRIMARY,slug                  | slug                  | 402     | const                  |    1 |   100.00 | Using index; Using temporary; Using filesort |
-|  1 | SIMPLE      | p     | NULL       | ref   | PRIMARY,idx_products_category | idx_products_category | 8       | const                  |  625 |   100.00 | NULL                                         |
-|  1 | SIMPLE      | v     | NULL       | ref   | idx_variants_product          | idx_variants_product  | 8       | ecommerce.p.product_id |    2 |   100.00 | NULL                                         |
-+----+-------------+-------+------------+-------+-------------------------------+-----------------------+---------+------------------------+------+----------+----------------------------------------------+
+```json
+[
+  {
+    "product_id": 2,
+    "name": "Summer Dress",
+    "base_price": "148.39",
+    "variants": [
+      {
+        "variant_id": 3,
+        "size": "Small",
+        "color": "blue",
+        "price": "152.17",
+        "stock_quantity": 5
+      },
+      {
+        "variant_id": 4,
+        "size": "Medium",
+        "color": "blue",
+        "price": "152.93",
+        "stock_quantity": 35
+      },
+      {
+        "variant_id": 5,
+        "size": "Large",
+        "color": "blue",
+        "price": "150.84",
+        "stock_quantity": 8
+      },
+      {
+        "variant_id": 6,
+        "size": "Small",
+        "color": "aqua-blue",
+        "price": "149.77",
+        "stock_quantity": 4
+      },
+      {
+        "variant_id": 7,
+        "size": "Medium",
+        "color": "aqua-blue",
+        "price": "148.92",
+        "stock_quantity": 4
+      },
+      {
+        "variant_id": 8,
+        "size": "Large",
+        "color": "aqua-blue",
+        "price": "150.93",
+        "stock_quantity": 32
+      },
+      {
+        "variant_id": 9,
+        "size": "Small",
+        "color": "black",
+        "price": "149.54",
+        "stock_quantity": 22
+      },
+      {
+        "variant_id": 10,
+        "size": "Medium",
+        "color": "black",
+        "price": "150.59",
+        "stock_quantity": 30
+      },
+      {
+        "variant_id": 11,
+        "size": "Large",
+        "color": "black",
+        "price": "149.94",
+        "stock_quantity": 14
+      }
+    ],
+    "attributes": {
+      "material": "polyester",
+      "style": "summer dress",
+      "care_instructions": "Machine wash cold"
+    }
+  },
+  {
+    "product_id": 10,
+    "name": "Summer Dress 00010",
+    "base_price": "147.35",
+    "variants": [
+      {
+        "variant_id": 21,
+        "size": "Small",
+        "color": "blue",
+        "price": "151.20",
+        "stock_quantity": 34
+      },
+      {
+        "variant_id": 22,
+        "size": "Medium",
+        "color": "blue",
+        "price": "150.25",
+        "stock_quantity": 2
+      },
+      {
+        "variant_id": 23,
+        "size": "Large",
+        "color": "blue",
+        "price": "151.45",
+        "stock_quantity": 0
+      },
+      {
+        "variant_id": 24,
+        "size": "Small",
+        "color": "aqua-blue",
+        "price": "151.82",
+        "stock_quantity": 15
+      },
+      {
+        "variant_id": 25,
+        "size": "Medium",
+        "color": "aqua-blue",
+        "price": "151.51",
+        "stock_quantity": 3
+      },
+      {
+        "variant_id": 26,
+        "size": "Large",
+        "color": "aqua-blue",
+        "price": "147.74",
+        "stock_quantity": 3
+      },
+      {
+        "variant_id": 27,
+        "size": "Small",
+        "color": "black",
+        "price": "147.99",
+        "stock_quantity": 28
+      },
+      {
+        "variant_id": 28,
+        "size": "Medium",
+        "color": "black",
+        "price": "148.27",
+        "stock_quantity": 18
+      },
+      {
+        "variant_id": 29,
+        "size": "Large",
+        "color": "black",
+        "price": "147.57",
+        "stock_quantity": 20
+      }
+    ],
+    "attributes": {
+      "material": "polyester",
+      "style": "summer dress",
+      "care_instructions": "Machine wash cold"
+    }
+  },
+  {
+    "product_id": 18,
+    "name": "Cotton Dress 00018",
+    "base_price": "146.62",
+    "variants": [
+      {
+        "variant_id": 39,
+        "size": "Small",
+        "color": "blue",
+        "price": "151.48",
+        "stock_quantity": 31
+      },
+      {
+        "variant_id": 40,
+        "size": "Medium",
+        "color": "blue",
+        "price": "148.05",
+        "stock_quantity": 5
+      },
+      {
+        "variant_id": 41,
+        "size": "Large",
+        "color": "blue",
+        "price": "147.66",
+        "stock_quantity": 8
+      },
+      {
+        "variant_id": 42,
+        "size": "Small",
+        "color": "aqua-blue",
+        "price": "150.92",
+        "stock_quantity": 33
+      },
+      {
+        "variant_id": 43,
+        "size": "Medium",
+        "color": "aqua-blue",
+        "price": "147.80",
+        "stock_quantity": 19
+      },
+      {
+        "variant_id": 44,
+        "size": "Large",
+        "color": "aqua-blue",
+        "price": "150.41",
+        "stock_quantity": 35
+      },
+      {
+        "variant_id": 45,
+        "size": "Small",
+        "color": "black",
+        "price": "147.69",
+        "stock_quantity": 7
+      },
+      {
+        "variant_id": 46,
+        "size": "Medium",
+        "color": "black",
+        "price": "148.52",
+        "stock_quantity": 9
+      },
+      {
+        "variant_id": 47,
+        "size": "Large",
+        "color": "black",
+        "price": "146.80",
+        "stock_quantity": 15
+      }
+    ],
+    "attributes": {
+      "material": "polyester",
+      "style": "summer dress",
+      "care_instructions": "Machine wash cold"
+    }
+  }
+]
 ```
 
 </details>
 
 <details>
-<summary>Raw MongoDB explain: db.product_attributes.find(...)</summary>
+<summary>MySQL query and execution plan</summary>
+
+```sql
+SELECT p.product_id, p.name, p.base_price,
+            v.variant_id, v.size, v.color, v.price, v.stock_quantity
+        FROM products p
+        JOIN categories c ON c.category_id = p.category_id
+        JOIN product_variants v ON v.product_id = p.product_id
+        WHERE c.slug = %s
+        ORDER BY p.product_id, v.variant_id
+```
+
+Parameters: `["fashion"]`.
+
+```json
+[
+  {
+    "id": 1,
+    "select_type": "SIMPLE",
+    "table": "c",
+    "partitions": null,
+    "type": "const",
+    "possible_keys": "PRIMARY,slug",
+    "key": "slug",
+    "key_len": "402",
+    "ref": "const",
+    "rows": 1,
+    "filtered": 100.0,
+    "Extra": "Using index; Using temporary; Using filesort"
+  },
+  {
+    "id": 1,
+    "select_type": "SIMPLE",
+    "table": "p",
+    "partitions": null,
+    "type": "ref",
+    "possible_keys": "PRIMARY,idx_products_category",
+    "key": "idx_products_category",
+    "key_len": "8",
+    "ref": "const",
+    "rows": 625,
+    "filtered": 100.0,
+    "Extra": null
+  },
+  {
+    "id": 1,
+    "select_type": "SIMPLE",
+    "table": "v",
+    "partitions": null,
+    "type": "ref",
+    "possible_keys": "idx_variants_product",
+    "key": "idx_variants_product",
+    "key_len": "8",
+    "ref": "ecommerce.p.product_id",
+    "rows": 2,
+    "filtered": 100.0,
+    "Extra": null
+  }
+]
+```
+
+</details>
+
+<details>
+<summary>MongoDB query and execution plan</summary>
+
+```json
+{
+  "find": "product_attributes",
+  "filter": {
+    "product_id": {
+      "$in": [
+        2,
+        10,
+        18,
+        26,
+        34,
+        42,
+        50,
+        58,
+        66,
+        74,
+        "... 615 more elements omitted"
+      ]
+    }
+  },
+  "projection": {
+    "_id": 0,
+    "product_id": 1,
+    "attributes": 1
+  }
+}
+```
 
 ```json
 {
@@ -99,7 +394,7 @@ EXPLAIN SELECT p.product_id, p.name, p.base_price, v.variant_id, v.size, v.color
           58,
           66,
           74,
-          "... 615 more"
+          "... 615 more elements omitted"
         ]
       }
     },
@@ -149,7 +444,7 @@ EXPLAIN SELECT p.product_id, p.name, p.base_price, v.variant_id, v.size, v.color
               "[58, 58]",
               "[66, 66]",
               "[74, 74]",
-              "... 615 more"
+              "... 615 more elements omitted"
             ]
           }
         }
@@ -229,7 +524,7 @@ EXPLAIN SELECT p.product_id, p.name, p.base_price, v.variant_id, v.size, v.color
               "[58, 58]",
               "[66, 66]",
               "[74, 74]",
-              "... 615 more"
+              "... 615 more elements omitted"
             ]
           },
           "keysExamined": 1250,
@@ -240,523 +535,458 @@ EXPLAIN SELECT p.product_id, p.name, p.base_price, v.variant_id, v.size, v.color
       }
     }
   },
-  "queryShapeHash": "D8B98C31809CF03142C54BF071CD2FFCE0365E137F2DB212170878424AFF733D",
-  "command": {
-    "find": "product_attributes",
-    "filter": {
-      "product_id": {
-        "$in": [
-          2,
-          10,
-          18,
-          26,
-          34,
-          42,
-          50,
-          58,
-          66,
-          74,
-          "... 615 more"
-        ]
-      }
-    },
-    "projection": {
-      "_id": 0,
-      "product_id": 1,
-      "attributes": 1
-    },
-    "$db": "ecommerce"
-  },
-  "serverInfo": {
-    "host": "63c422aab0b2",
-    "port": 27017,
-    "version": "8.0.38",
-    "gitVersion": "b2f7afe3a6838999fd375c7a7ea678189f795568"
-  },
-  "serverParameters": {
-    "internalQueryFacetBufferSizeBytes": 104857600,
-    "internalQueryFacetMaxOutputDocSizeBytes": 104857600,
-    "internalLookupStageIntermediateDocumentMaxSizeBytes": 104857600,
-    "internalDocumentSourceGroupMaxMemoryBytes": 104857600,
-    "internalQueryMaxBlockingSortMemoryUsageBytes": 104857600,
-    "internalQueryProhibitBlockingMergeOnMongoS": 0,
-    "internalQueryMaxAddToSetBytes": 104857600,
-    "internalDocumentSourceSetWindowFieldsMaxMemoryBytes": 104857600,
-    "internalQueryFrameworkControl": "trySbeRestricted",
-    "internalQueryPlannerIgnoreIndexWithCollationForRegex": 1
-  },
   "ok": 1.0
 }
 ```
 
 </details>
 
-### Query 2: Sarah's last 5 viewed products
+### Query 2: Sarah's last 5 viewed products (6 months)
 
-Redis has no plan and does a sorted-set lookup by score. MySQL looks up the 5 product ids by primary key. If we get less than 5 results back from the Redis cache then we check MongoDB. It uses the `(user_id, event_type, occurred_at)` index and examines only 17 documents.
-
-Redis has no explain, so there is no raw plan for it. The command is `ZREVRANGEBYSCORE recent:1 +inf <six months ago> WITHSCORES LIMIT 0 5`.
+Redis uses ZREVRANGEBYSCORE on recent:1, with the six-calendar-month timestamp as the minimum score and a limit of five. MySQL fetches product details by primary key. On fewer than five cached matches, the implementation instead groups MongoDB views by product, sorts by last view time, and takes five. No MongoDB fallback plan was collected because these runs were cache hits.
 
 <details>
-<summary>Raw MySQL EXPLAIN</summary>
-
-```sql
-EXPLAIN SELECT product_id, name, base_price FROM products WHERE product_id IN (1, 2, 163, 3, 4037);
-```
-
-```
-+----+-------------+----------+------------+-------+---------------+---------+---------+------+------+----------+-------------+
-| id | select_type | table    | partitions | type  | possible_keys | key     | key_len | ref  | rows | filtered | Extra       |
-+----+-------------+----------+------------+-------+---------------+---------+---------+------+------+----------+-------------+
-|  1 | SIMPLE      | products | NULL       | range | PRIMARY       | PRIMARY | 8       | NULL |    5 |   100.00 | Using where |
-+----+-------------+----------+------------+-------+---------------+---------+---------+------+------+----------+-------------+
-```
-
-</details>
-
-<details>
-<summary>Raw MongoDB explain: db.events.aggregate(...) (fallback only)</summary>
+<summary>Results: 5 records; complete output.</summary>
 
 ```json
-{
-  "explainVersion": "2",
-  "stages": [
-    {
-      "$cursor": {
-        "queryPlanner": {
-          "namespace": "ecommerce.events",
-          "parsedQuery": {
-            "$and": [
-              {
-                "event_type": {
-                  "$eq": "product_view"
-                }
-              },
-              {
-                "user_id": {
-                  "$eq": 1
-                }
-              },
-              {
-                "occurred_at": {
-                  "$gte": {
-                    "$date": "2026-05-24T17:35:04.911Z"
-                  }
-                }
-              }
-            ]
-          },
-          "indexFilterSet": false,
-          "queryHash": "3C8E1208",
-          "planCacheShapeHash": "3C8E1208",
-          "planCacheKey": "99E9DE79",
-          "optimizationTimeMillis": 1,
-          "maxIndexedOrSolutionsReached": false,
-          "maxIndexedAndSolutionsReached": false,
-          "maxScansToExplodeReached": false,
-          "prunedSimilarIndexes": false,
-          "winningPlan": {
-            "isCached": false,
-            "queryPlan": {
-              "stage": "GROUP",
-              "planNodeId": 4,
-              "inputStage": {
-                "stage": "FETCH",
-                "planNodeId": 2,
-                "inputStage": {
-                  "stage": "IXSCAN",
-                  "planNodeId": 1,
-                  "keyPattern": {
-                    "user_id": 1,
-                    "event_type": 1,
-                    "occurred_at": -1
-                  },
-                  "indexName": "user_id_1_event_type_1_occurred_at_-1",
-                  "isMultiKey": false,
-                  "multiKeyPaths": {
-                    "user_id": [],
-                    "event_type": [],
-                    "occurred_at": []
-                  },
-                  "isUnique": false,
-                  "isSparse": false,
-                  "isPartial": false,
-                  "indexVersion": 2,
-                  "direction": "forward",
-                  "indexBounds": {
-                    "user_id": [
-                      "[1, 1]"
-                    ],
-                    "event_type": [
-                      "[\"product_view\", \"product_view\"]"
-                    ],
-                    "occurred_at": [
-                      "[new Date(9223372036854775807), new Date(1779644104911)]"
-                    ]
-                  }
-                }
-              }
-            },
-            "slotBasedPlan": {
-              "slots": "$$RESULT=s14 env: { s5 = {\"user_id\" : 1, \"event_type\" : 1, \"occurred_at\" : -1} }",
-              "stages": "[4] project [s14 = newObj(\"_id\", s11, \"viewed_at\", s13)] \n[4] project [s13 = (s12 ?: null)] \n[4] group [s11] [s12 = max(fillType(s8, 1088, Nothing))] spillSlots[s10] mergingExprs[max(fillType(s10, 1088, Nothing))] \n[4] project [s11 = (s9 ?: null)] \n[2] nlj inner [] [s1, s2, s3, s4, s5] \n    left \n        [1] ixseek KS(2B023C70726F647563745F76696577008700000000000000000104) KS(2B023C70726F647563745F7669657700877FFFFE61A4F1FF30FE04) s4 s1 s2 s3 [] @\"e193b9a5-a961-4041-87cf-375a36e497c1\" @\"user_id_1_event_type_1_occurred_at_-1\" true \n    right \n        [2] limit 1ll \n        [2] seek s1 s6 s7 s2 s3 s4 s5 none none [s8 = occurred_at, s9 = product_id] @\"e193b9a5-a961-4041-87cf-375a36e497c1\" true false \n"
-            }
-          },
-          "rejectedPlans": [
-            {
-              "isCached": false,
-              "stage": "PROJECTION_SIMPLE",
-              "transformBy": {
-                "occurred_at": 1,
-                "product_id": 1,
-                "_id": 0
-              },
-              "inputStage": {
-                "stage": "FETCH",
-                "filter": {
-                  "$and": [
-                    {
-                      "occurred_at": {
-                        "$gte": {
-                          "$date": "2026-05-24T17:35:04.911Z"
-                        }
-                      }
-                    },
-                    {
-                      "user_id": {
-                        "$eq": 1
-                      }
-                    }
-                  ]
-                },
-                "inputStage": {
-                  "stage": "IXSCAN",
-                  "keyPattern": {
-                    "event_type": 1,
-                    "product_id": 1
-                  },
-                  "indexName": "event_type_1_product_id_1",
-                  "isMultiKey": false,
-                  "multiKeyPaths": {
-                    "event_type": [],
-                    "product_id": []
-                  },
-                  "isUnique": false,
-                  "isSparse": false,
-                  "isPartial": false,
-                  "indexVersion": 2,
-                  "direction": "forward",
-                  "indexBounds": {
-                    "event_type": [
-                      "[\"product_view\", \"product_view\"]"
-                    ],
-                    "product_id": [
-                      "[MinKey, MaxKey]"
-                    ]
-                  }
-                }
-              }
-            }
-          ]
-        },
-        "executionStats": {
-          "executionSuccess": true,
-          "nReturned": 14,
-          "executionTimeMillis": 1,
-          "totalKeysExamined": 17,
-          "totalDocsExamined": 17,
-          "executionStages": {
-            "stage": "project",
-            "planNodeId": 4,
-            "nReturned": 14,
-            "executionTimeMillisEstimate": 0,
-            "opens": 1,
-            "closes": 1,
-            "saveState": 1,
-            "restoreState": 1,
-            "isEOF": 1,
-            "projections": {
-              "14": "newObj(\"_id\", s11, \"viewed_at\", s13) "
-            },
-            "inputStage": {
-              "stage": "project",
-              "planNodeId": 4,
-              "nReturned": 14,
-              "executionTimeMillisEstimate": 0,
-              "opens": 1,
-              "closes": 1,
-              "saveState": 1,
-              "restoreState": 1,
-              "isEOF": 1,
-              "projections": {
-                "13": "(s12 ?: null) "
-              },
-              "inputStage": {
-                "stage": "group",
-                "planNodeId": 4,
-                "nReturned": 14,
-                "executionTimeMillisEstimate": 0,
-                "opens": 1,
-                "closes": 1,
-                "saveState": 1,
-                "restoreState": 1,
-                "isEOF": 1,
-                "groupBySlots": [
-                  11
-                ],
-                "expressions": {
-                  "12": "max(fillType(s8, 1088, Nothing)) ",
-                  "initExprs": {
-                    "12": null
-                  }
-                },
-                "mergingExprs": {
-                  "10": "max(fillType(s10, 1088, Nothing)) "
-                },
-                "usedDisk": false,
-                "spills": 0,
-                "spilledBytes": 0,
-                "spilledRecords": 0,
-                "spilledDataStorageSize": 0,
-                "inputStage": {
-                  "stage": "project",
-                  "planNodeId": 4,
-                  "nReturned": 17,
-                  "executionTimeMillisEstimate": 0,
-                  "opens": 1,
-                  "closes": 1,
-                  "saveState": 1,
-                  "restoreState": 1,
-                  "isEOF": 1,
-                  "projections": {
-                    "11": "(s9 ?: null) "
-                  },
-                  "inputStage": {
-                    "stage": "nlj",
-                    "planNodeId": 2,
-                    "nReturned": 17,
-                    "executionTimeMillisEstimate": 0,
-                    "opens": 1,
-                    "closes": 1,
-                    "saveState": 1,
-                    "restoreState": 1,
-                    "isEOF": 1,
-                    "totalDocsExamined": 17,
-                    "totalKeysExamined": 17,
-                    "collectionScans": 0,
-                    "collectionSeeks": 17,
-                    "indexScans": 0,
-                    "indexSeeks": 1,
-                    "indexesUsed": [
-                      "user_id_1_event_type_1_occurred_at_-1"
-                    ],
-                    "innerOpens": 17,
-                    "innerCloses": 1,
-                    "outerProjects": [],
-                    "outerCorrelated": [
-                      1,
-                      2,
-                      3,
-                      4,
-                      5
-                    ],
-                    "outerStage": {
-                      "stage": "ixseek",
-                      "planNodeId": 1,
-                      "nReturned": 17,
-                      "executionTimeMillisEstimate": 0,
-                      "opens": 1,
-                      "closes": 1,
-                      "saveState": 1,
-                      "restoreState": 1,
-                      "isEOF": 1,
-                      "indexName": "user_id_1_event_type_1_occurred_at_-1",
-                      "keysExamined": 17,
-                      "seeks": 1,
-                      "numReads": 18,
-                      "indexKeySlot": 4,
-                      "recordIdSlot": 1,
-                      "snapshotIdSlot": 2,
-                      "indexIdentSlot": 3,
-                      "outputSlots": [],
-                      "indexKeysToInclude": "00000000000000000000000000000000",
-                      "seekKeyLow": "KS(2B023C70726F647563745F76696577008700000000000000000104) ",
-                      "seekKeyHigh": "KS(2B023C70726F647563745F7669657700877FFFFE61A4F1FF30FE04) "
-                    },
-                    "innerStage": {
-                      "stage": "limit",
-                      "planNodeId": 2,
-                      "nReturned": 17,
-                      "executionTimeMillisEstimate": 0,
-                      "opens": 17,
-                      "closes": 1,
-                      "saveState": 1,
-                      "restoreState": 1,
-                      "isEOF": 1,
-                      "limit": 1,
-                      "inputStage": {
-                        "stage": "seek",
-                        "planNodeId": 2,
-                        "nReturned": 17,
-                        "executionTimeMillisEstimate": 0,
-                        "opens": 17,
-                        "closes": 1,
-                        "saveState": 1,
-                        "restoreState": 1,
-                        "isEOF": 0,
-                        "numReads": 17,
-                        "recordSlot": 6,
-                        "recordIdSlot": 7,
-                        "seekRecordIdSlot": 1,
-                        "snapshotIdSlot": 2,
-                        "indexIdentSlot": 3,
-                        "indexKeySlot": 4,
-                        "indexKeyPatternSlot": 5,
-                        "scanFieldNames": [
-                          "occurred_at",
-                          "product_id"
-                        ],
-                        "scanFieldSlots": [
-                          8,
-                          9
-                        ]
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "nReturned": 14,
-      "executionTimeMillisEstimate": 1
-    },
-    {
-      "$sort": {
-        "sortKey": {
-          "viewed_at": -1
-        },
-        "limit": 5
-      },
-      "totalDataSizeSortedBytesEstimate": 1265,
-      "usedDisk": false,
-      "spills": 0,
-      "spilledDataStorageSize": 0,
-      "nReturned": 5,
-      "executionTimeMillisEstimate": 1
-    }
-  ],
-  "queryShapeHash": "F334AF56822681E3C1C680C79F31269F1726E0DF28BED5FF8C40CBC0F464BA08",
-  "serverInfo": {
-    "host": "63c422aab0b2",
-    "port": 27017,
-    "version": "8.0.38",
-    "gitVersion": "b2f7afe3a6838999fd375c7a7ea678189f795568"
+[
+  {
+    "product_id": 1,
+    "name": "Wireless Headphones",
+    "base_price": "35.89",
+    "viewed_at": "2026-11-19 19:51:24.982009+00:00"
   },
-  "serverParameters": {
-    "internalQueryFacetBufferSizeBytes": 104857600,
-    "internalQueryFacetMaxOutputDocSizeBytes": 104857600,
-    "internalLookupStageIntermediateDocumentMaxSizeBytes": 104857600,
-    "internalDocumentSourceGroupMaxMemoryBytes": 104857600,
-    "internalQueryMaxBlockingSortMemoryUsageBytes": 104857600,
-    "internalQueryProhibitBlockingMergeOnMongoS": 0,
-    "internalQueryMaxAddToSetBytes": 104857600,
-    "internalDocumentSourceSetWindowFieldsMaxMemoryBytes": 104857600,
-    "internalQueryFrameworkControl": "trySbeRestricted",
-    "internalQueryPlannerIgnoreIndexWithCollationForRegex": 1
+  {
+    "product_id": 2,
+    "name": "Summer Dress",
+    "base_price": "148.39",
+    "viewed_at": "2026-11-17 19:51:24.982009+00:00"
   },
-  "command": {
-    "aggregate": "events",
-    "pipeline": [
-      {
-        "$match": {
-          "user_id": 1,
-          "event_type": "product_view",
-          "occurred_at": {
-            "$gte": {
-              "$date": "2026-05-24T17:35:04.911Z"
-            }
-          }
-        }
-      },
-      {
-        "$group": {
-          "_id": "$product_id",
-          "viewed_at": {
-            "$max": "$occurred_at"
-          }
-        }
-      },
-      {
-        "$sort": {
-          "viewed_at": -1
-        }
-      },
-      {
-        "$limit": 5
-      }
-    ],
-    "cursor": {},
-    "$db": "ecommerce"
+  {
+    "product_id": 163,
+    "name": "Stoneware Vase 00163",
+    "base_price": "211.40",
+    "viewed_at": "2026-11-16 05:23:17.314157+00:00"
   },
-  "ok": 1.0
-}
+  {
+    "product_id": 3,
+    "name": "Ceramic Vase",
+    "base_price": "19.02",
+    "viewed_at": "2026-11-15 19:51:24.982009+00:00"
+  },
+  {
+    "product_id": 4037,
+    "name": "Chef Knife 04037",
+    "base_price": "176.73",
+    "viewed_at": "2026-10-26 19:09:35.804782+00:00"
+  }
+]
+```
+
+</details>
+
+<details>
+<summary>MySQL query and execution plan</summary>
+
+```sql
+SELECT product_id, name, base_price FROM products WHERE product_id IN (%s, %s, %s, %s, %s)
+```
+
+Parameters: `[1, 2, 163, 3, 4037]`.
+
+```json
+[
+  {
+    "id": 1,
+    "select_type": "SIMPLE",
+    "table": "products",
+    "partitions": null,
+    "type": "range",
+    "possible_keys": "PRIMARY",
+    "key": "PRIMARY",
+    "key_len": "8",
+    "ref": null,
+    "rows": 5,
+    "filtered": 100.0,
+    "Extra": "Using where"
+  }
+]
 ```
 
 </details>
 
 ### Query 3: Variants with stock under 5
 
-MySQL only. A range scan on `idx_variants_stock` finds all the variants under 5 units. Each product name comes from a primary key lookup.
+MySQL filters authoritative variant stock below five, then joins product details.
 
 <details>
-<summary>Raw MySQL EXPLAIN</summary>
+<summary>Results: 1,579 records; first three records shown.</summary>
+
+```json
+[
+  {
+    "variant_id": 20,
+    "sku": "SKU-0000020",
+    "size": null,
+    "color": "blue",
+    "stock_quantity": 0,
+    "product_id": 9,
+    "name": "Studio Headphones 00009"
+  },
+  {
+    "variant_id": 23,
+    "sku": "SKU-0000023",
+    "size": "Large",
+    "color": "blue",
+    "stock_quantity": 0,
+    "product_id": 10,
+    "name": "Summer Dress 00010"
+  },
+  {
+    "variant_id": 72,
+    "sku": "SKU-0000072",
+    "size": null,
+    "color": null,
+    "stock_quantity": 0,
+    "product_id": 32,
+    "name": "Cookbook 00032"
+  }
+]
+```
+
+</details>
+
+<details>
+<summary>MySQL query and execution plan</summary>
 
 ```sql
-EXPLAIN SELECT v.variant_id, v.sku, v.size, v.color, v.stock_quantity, p.product_id, p.name FROM product_variants v JOIN products p ON p.product_id = v.product_id WHERE v.stock_quantity < 5 ORDER BY v.stock_quantity, v.variant_id;
+SELECT v.variant_id, v.sku, v.size, v.color, v.stock_quantity,
+            p.product_id, p.name
+        FROM product_variants v
+        JOIN products p ON p.product_id = v.product_id
+        WHERE v.stock_quantity < %s
+        ORDER BY v.stock_quantity, v.variant_id
 ```
 
-```
-+----+-------------+-------+------------+--------+-----------------------------------------+--------------------+---------+------------------------+------+----------+-----------------------+
-| id | select_type | table | partitions | type   | possible_keys                           | key                | key_len | ref                    | rows | filtered | Extra                 |
-+----+-------------+-------+------------+--------+-----------------------------------------+--------------------+---------+------------------------+------+----------+-----------------------+
-|  1 | SIMPLE      | v     | NULL       | range  | idx_variants_product,idx_variants_stock | idx_variants_stock | 4       | NULL                   | 1579 |   100.00 | Using index condition |
-|  1 | SIMPLE      | p     | NULL       | eq_ref | PRIMARY                                 | PRIMARY            | 8       | ecommerce.v.product_id |    1 |   100.00 | NULL                  |
-+----+-------------+-------+------------+--------+-----------------------------------------+--------------------+---------+------------------------+------+----------+-----------------------+
+Parameters: `[5]`.
+
+```json
+[
+  {
+    "id": 1,
+    "select_type": "SIMPLE",
+    "table": "v",
+    "partitions": null,
+    "type": "range",
+    "possible_keys": "idx_variants_product,idx_variants_stock",
+    "key": "idx_variants_stock",
+    "key_len": "4",
+    "ref": null,
+    "rows": 1579,
+    "filtered": 100.0,
+    "Extra": "Using index condition"
+  },
+  {
+    "id": 1,
+    "select_type": "SIMPLE",
+    "table": "p",
+    "partitions": null,
+    "type": "eq_ref",
+    "possible_keys": "PRIMARY",
+    "key": "PRIMARY",
+    "key_len": "8",
+    "ref": "ecommerce.v.product_id",
+    "rows": 1,
+    "filtered": 100.0,
+    "Extra": null
+  }
+]
 ```
 
 </details>
 
 ### Query 4: Fashion products in blue or size Large
 
-MySQL only. The fashion products and their variants are found through indexes (`slug`, `idx_products_category`, `idx_variants_product`). The blue/Large and stock conditions are applied afterward as filters. Note that we don't use an index on this last filter since size+color indexes would be too much overhead.
+MySQL filters fashion variants for blue or Large, positive stock, and active status. The plan below shows the access path actually chosen; the schema also provides color/stock and size/stock indexes.
 
 <details>
-<summary>Raw MySQL EXPLAIN</summary>
+<summary>Results: 625 records; first three records shown.</summary>
+
+```json
+[
+  {
+    "product_id": 2,
+    "name": "Summer Dress",
+    "base_price": "148.39",
+    "variants": [
+      {
+        "variant_id": 3,
+        "size": "Small",
+        "color": "blue",
+        "price": "152.17",
+        "stock_quantity": 5
+      },
+      {
+        "variant_id": 4,
+        "size": "Medium",
+        "color": "blue",
+        "price": "152.93",
+        "stock_quantity": 35
+      },
+      {
+        "variant_id": 5,
+        "size": "Large",
+        "color": "blue",
+        "price": "150.84",
+        "stock_quantity": 8
+      },
+      {
+        "variant_id": 8,
+        "size": "Large",
+        "color": "aqua-blue",
+        "price": "150.93",
+        "stock_quantity": 32
+      },
+      {
+        "variant_id": 11,
+        "size": "Large",
+        "color": "black",
+        "price": "149.94",
+        "stock_quantity": 14
+      }
+    ]
+  },
+  {
+    "product_id": 10,
+    "name": "Summer Dress 00010",
+    "base_price": "147.35",
+    "variants": [
+      {
+        "variant_id": 21,
+        "size": "Small",
+        "color": "blue",
+        "price": "151.20",
+        "stock_quantity": 34
+      },
+      {
+        "variant_id": 22,
+        "size": "Medium",
+        "color": "blue",
+        "price": "150.25",
+        "stock_quantity": 2
+      },
+      {
+        "variant_id": 26,
+        "size": "Large",
+        "color": "aqua-blue",
+        "price": "147.74",
+        "stock_quantity": 3
+      },
+      {
+        "variant_id": 29,
+        "size": "Large",
+        "color": "black",
+        "price": "147.57",
+        "stock_quantity": 20
+      }
+    ]
+  },
+  {
+    "product_id": 18,
+    "name": "Cotton Dress 00018",
+    "base_price": "146.62",
+    "variants": [
+      {
+        "variant_id": 39,
+        "size": "Small",
+        "color": "blue",
+        "price": "151.48",
+        "stock_quantity": 31
+      },
+      {
+        "variant_id": 40,
+        "size": "Medium",
+        "color": "blue",
+        "price": "148.05",
+        "stock_quantity": 5
+      },
+      {
+        "variant_id": 41,
+        "size": "Large",
+        "color": "blue",
+        "price": "147.66",
+        "stock_quantity": 8
+      },
+      {
+        "variant_id": 44,
+        "size": "Large",
+        "color": "aqua-blue",
+        "price": "150.41",
+        "stock_quantity": 35
+      },
+      {
+        "variant_id": 47,
+        "size": "Large",
+        "color": "black",
+        "price": "146.80",
+        "stock_quantity": 15
+      }
+    ]
+  }
+]
+```
+
+</details>
+
+<details>
+<summary>MySQL query and execution plan</summary>
 
 ```sql
-EXPLAIN SELECT p.product_id, p.name, p.base_price, v.variant_id, v.size, v.color, v.price, v.stock_quantity FROM products p JOIN categories c ON c.category_id = p.category_id JOIN product_variants v ON v.product_id = p.product_id WHERE c.slug = 'fashion' AND (v.color = 'blue' OR v.size = 'Large') AND v.stock_quantity > 0 AND v.is_active = 1 AND p.is_active = 1 ORDER BY p.product_id, v.variant_id;
+SELECT p.product_id, p.name, p.base_price,
+            v.variant_id, v.size, v.color, v.price, v.stock_quantity
+        FROM products p
+        JOIN categories c ON c.category_id = p.category_id
+        JOIN product_variants v ON v.product_id = p.product_id
+        WHERE c.slug = %s
+        AND (v.color = %s OR v.size = %s)
+        AND v.stock_quantity > 0
+        AND v.is_active = 1
+        AND p.is_active = 1
+        ORDER BY p.product_id, v.variant_id
 ```
 
-```
-+----+-------------+-------+------------+-------+------------------------------------------------------------------------------------------+-----------------------+---------+------------------------+------+----------+----------------------------------------------+
-| id | select_type | table | partitions | type  | possible_keys                                                                            | key                   | key_len | ref                    | rows | filtered | Extra                                        |
-+----+-------------+-------+------------+-------+------------------------------------------------------------------------------------------+-----------------------+---------+------------------------+------+----------+----------------------------------------------+
-|  1 | SIMPLE      | c     | NULL       | const | PRIMARY,slug                                                                             | slug                  | 402     | const                  |    1 |   100.00 | Using index; Using temporary; Using filesort |
-|  1 | SIMPLE      | p     | NULL       | ref   | PRIMARY,idx_products_category                                                            | idx_products_category | 8       | const                  |  625 |    10.00 | Using where                                  |
-|  1 | SIMPLE      | v     | NULL       | ref   | idx_variants_product,idx_variants_stock,idx_variants_color_stock,idx_variants_size_stock | idx_variants_product  | 8       | ecommerce.p.product_id |    2 |     2.21 | Using where                                  |
-+----+-------------+-------+------------+-------+------------------------------------------------------------------------------------------+-----------------------+---------+------------------------+------+----------+----------------------------------------------+
+Parameters: `["fashion", "blue", "Large"]`.
+
+```json
+[
+  {
+    "id": 1,
+    "select_type": "SIMPLE",
+    "table": "c",
+    "partitions": null,
+    "type": "const",
+    "possible_keys": "PRIMARY,slug",
+    "key": "slug",
+    "key_len": "402",
+    "ref": "const",
+    "rows": 1,
+    "filtered": 100.0,
+    "Extra": "Using index; Using temporary; Using filesort"
+  },
+  {
+    "id": 1,
+    "select_type": "SIMPLE",
+    "table": "p",
+    "partitions": null,
+    "type": "ref",
+    "possible_keys": "PRIMARY,idx_products_category",
+    "key": "idx_products_category",
+    "key_len": "8",
+    "ref": "const",
+    "rows": 625,
+    "filtered": 10.0,
+    "Extra": "Using where"
+  },
+  {
+    "id": 1,
+    "select_type": "SIMPLE",
+    "table": "v",
+    "partitions": null,
+    "type": "ref",
+    "possible_keys": "idx_variants_product,idx_variants_stock,idx_variants_color_stock,idx_variants_size_stock",
+    "key": "idx_variants_product",
+    "key_len": "8",
+    "ref": "ecommerce.p.product_id",
+    "rows": 2,
+    "filtered": 2.26,
+    "Extra": "Using where"
+  }
+]
 ```
 
 </details>
 
 ### Query 5: Page-view count per product
 
-MongoDB counts the `product_view` events with an index scan on `(event_type, product_id)`: it reads 275,491 index entries and 0 documents. MySQL then reads every product name with a full table scan, which is fine because the answer includes all 5,000 products anyways. The sort is done in Python since we need the results from MongoDB and MySQL to sort.
+MongoDB groups product_view events by product_id; MySQL supplies all products, including those with zero views. Python combines and sorts the answer.
 
 <details>
-<summary>Raw MongoDB explain: db.events.aggregate(...)</summary>
+<summary>Results: 5,000 records; first three records shown.</summary>
+
+```json
+[
+  {
+    "product_id": 1101,
+    "name": "Chef Knife 01101",
+    "views": 86
+  },
+  {
+    "product_id": 430,
+    "name": "Skin Cleanser 00430",
+    "views": 82
+  },
+  {
+    "product_id": 1213,
+    "name": "Cutting Board 01213",
+    "views": 82
+  }
+]
+```
+
+</details>
+
+<details>
+<summary>MySQL query and execution plan</summary>
+
+```sql
+SELECT product_id, name FROM products
+```
+
+```json
+[
+  {
+    "id": 1,
+    "select_type": "SIMPLE",
+    "table": "products",
+    "partitions": null,
+    "type": "ALL",
+    "possible_keys": null,
+    "key": null,
+    "key_len": null,
+    "ref": null,
+    "rows": 4869,
+    "filtered": 100.0,
+    "Extra": null
+  }
+]
+```
+
+</details>
+
+<details>
+<summary>MongoDB query and execution plan</summary>
+
+```json
+{
+  "aggregate": "events",
+  "pipeline": [
+    {
+      "$match": {
+        "event_type": "product_view"
+      }
+    },
+    {
+      "$group": {
+        "_id": "$product_id",
+        "views": {
+          "$sum": 1
+        }
+      }
+    }
+  ],
+  "cursor": {}
+}
+```
 
 ```json
 {
@@ -821,7 +1051,7 @@ MongoDB counts the `product_view` events with an index scan on `(event_type, pro
       },
       "slotBasedPlan": {
         "slots": "$$RESULT=s7 env: {  }",
-        "stages": "[3] project [s7 = newBsonObj(\"_id\", s4, \"views\", s6)] \n[3] project [s6 = (convert ( s5, int32) ?: s5)] \n[3] group [s4] [s5 = count()] spillSlots[s3] mergingExprs[sum(s3)] \n[3] project [s4 = (s1 ?: null)] \n[1] ixseek KS(3C70726F647563745F76696577000A0104) KS(3C70726F647563745F7669657700F0FE04) none s2 none none [s1 = 1] @\"e193b9a5-a961-4041-87cf-375a36e497c1\" @\"event_type_1_product_id_1\" true "
+        "stages": "[3] project [s7 = newBsonObj(\"_id\", s4, \"views\", s6)] \n[3] project [s6 = (convert ( s5, int32) ?: s5)] \n[3] group [s4] [s5 = count()] spillSlots[s3] mergingExprs[sum(s3)] \n[3] project [s4 = (s1 ?: null)] \n[1] ixseek KS(3C70726F647563745F76696577000A0104) KS(3C70726F647563745F7669657700F0FE04) none s2 none none [s1 = 1] @\"5f7be3c4-91d6-4f31-8cc7-2e7282b07620\" @\"event_type_1_product_id_1\" true "
       }
     },
     "rejectedPlans": []
@@ -829,18 +1059,18 @@ MongoDB counts the `product_view` events with an index scan on `(event_type, pro
   "executionStats": {
     "executionSuccess": true,
     "nReturned": 5000,
-    "executionTimeMillis": 50,
+    "executionTimeMillis": 46,
     "totalKeysExamined": 275491,
     "totalDocsExamined": 0,
     "executionStages": {
       "stage": "project",
       "planNodeId": 3,
       "nReturned": 5000,
-      "executionTimeMillisEstimate": 46,
+      "executionTimeMillisEstimate": 39,
       "opens": 1,
       "closes": 1,
-      "saveState": 3,
-      "restoreState": 3,
+      "saveState": 2,
+      "restoreState": 2,
       "isEOF": 1,
       "projections": {
         "7": "newBsonObj(\"_id\", s4, \"views\", s6) "
@@ -849,11 +1079,11 @@ MongoDB counts the `product_view` events with an index scan on `(event_type, pro
         "stage": "project",
         "planNodeId": 3,
         "nReturned": 5000,
-        "executionTimeMillisEstimate": 46,
+        "executionTimeMillisEstimate": 39,
         "opens": 1,
         "closes": 1,
-        "saveState": 3,
-        "restoreState": 3,
+        "saveState": 2,
+        "restoreState": 2,
         "isEOF": 1,
         "projections": {
           "6": "(convert ( s5, int32) ?: s5) "
@@ -862,11 +1092,11 @@ MongoDB counts the `product_view` events with an index scan on `(event_type, pro
           "stage": "group",
           "planNodeId": 3,
           "nReturned": 5000,
-          "executionTimeMillisEstimate": 46,
+          "executionTimeMillisEstimate": 39,
           "opens": 1,
           "closes": 1,
-          "saveState": 3,
-          "restoreState": 3,
+          "saveState": 2,
+          "restoreState": 2,
           "isEOF": 1,
           "groupBySlots": [
             4
@@ -889,11 +1119,11 @@ MongoDB counts the `product_view` events with an index scan on `(event_type, pro
             "stage": "project",
             "planNodeId": 3,
             "nReturned": 275491,
-            "executionTimeMillisEstimate": 42,
+            "executionTimeMillisEstimate": 39,
             "opens": 1,
             "closes": 1,
-            "saveState": 3,
-            "restoreState": 3,
+            "saveState": 2,
+            "restoreState": 2,
             "isEOF": 1,
             "projections": {
               "4": "(s1 ?: null) "
@@ -902,11 +1132,11 @@ MongoDB counts the `product_view` events with an index scan on `(event_type, pro
               "stage": "ixseek",
               "planNodeId": 1,
               "nReturned": 275491,
-              "executionTimeMillisEstimate": 31,
+              "executionTimeMillisEstimate": 39,
               "opens": 1,
               "closes": 1,
-              "saveState": 3,
-              "restoreState": 3,
+              "saveState": 2,
+              "restoreState": 2,
               "isEOF": 1,
               "indexName": "event_type_1_product_id_1",
               "keysExamined": 275491,
@@ -925,74 +1155,78 @@ MongoDB counts the `product_view` events with an index scan on `(event_type, pro
       }
     }
   },
-  "queryShapeHash": "BEA436D0FDB2F6E544A6744B4A5102B5BA7A90E52B245274F5E2B6C2EF75944F",
-  "command": {
-    "aggregate": "events",
-    "pipeline": [
-      {
-        "$match": {
-          "event_type": "product_view"
-        }
-      },
-      {
-        "$group": {
-          "_id": "$product_id",
-          "views": {
-            "$sum": 1
-          }
-        }
-      }
-    ],
-    "cursor": {},
-    "$db": "ecommerce"
-  },
-  "serverInfo": {
-    "host": "63c422aab0b2",
-    "port": 27017,
-    "version": "8.0.38",
-    "gitVersion": "b2f7afe3a6838999fd375c7a7ea678189f795568"
-  },
-  "serverParameters": {
-    "internalQueryFacetBufferSizeBytes": 104857600,
-    "internalQueryFacetMaxOutputDocSizeBytes": 104857600,
-    "internalLookupStageIntermediateDocumentMaxSizeBytes": 104857600,
-    "internalDocumentSourceGroupMaxMemoryBytes": 104857600,
-    "internalQueryMaxBlockingSortMemoryUsageBytes": 104857600,
-    "internalQueryProhibitBlockingMergeOnMongoS": 0,
-    "internalQueryMaxAddToSetBytes": 104857600,
-    "internalDocumentSourceSetWindowFieldsMaxMemoryBytes": 104857600,
-    "internalQueryFrameworkControl": "trySbeRestricted",
-    "internalQueryPlannerIgnoreIndexWithCollationForRegex": 1
-  },
   "ok": 1.0
 }
 ```
 
 </details>
 
+### Query 6: Sarah's search terms (30 days) by frequency and time of day
+
+MongoDB retrieves Sarah’s recent searches through the user/type/time filter. Python groups terms into the four UTC time periods and sorts by frequency.
+
 <details>
-<summary>Raw MySQL EXPLAIN</summary>
+<summary>Results: 4 records; complete output.</summary>
 
-```sql
-EXPLAIN SELECT product_id, name FROM products;
-```
-
-```
-+----+-------------+----------+------------+------+---------------+------+---------+------+------+----------+-------+
-| id | select_type | table    | partitions | type | possible_keys | key  | key_len | ref  | rows | filtered | Extra |
-+----+-------------+----------+------------+------+---------------+------+---------+------+------+----------+-------+
-|  1 | SIMPLE      | products | NULL       | ALL  | NULL          | NULL | NULL    | NULL | 4940 |   100.00 | NULL  |
-+----+-------------+----------+------------+------+---------------+------+---------+------+------+----------+-------+
+```json
+[
+  {
+    "search_term": "headphones",
+    "total": 4,
+    "night": 0,
+    "morning": 2,
+    "afternoon": 0,
+    "evening": 2
+  },
+  {
+    "search_term": "blue dress",
+    "total": 2,
+    "night": 0,
+    "morning": 0,
+    "afternoon": 2,
+    "evening": 0
+  },
+  {
+    "search_term": "ceramic vase",
+    "total": 1,
+    "night": 1,
+    "morning": 0,
+    "afternoon": 0,
+    "evening": 0
+  },
+  {
+    "search_term": "summer dress",
+    "total": 1,
+    "night": 1,
+    "morning": 0,
+    "afternoon": 0,
+    "evening": 0
+  }
+]
 ```
 
 </details>
 
-### Query 6: Sarah's search terms (30 days)
-
-MongoDB only. The `(user_id, event_type, occurred_at)` index matches the filter exactly, so only the 8 matching documents are read. Grouping by term and time of day is done in Python.
-
 <details>
-<summary>Raw MongoDB explain: db.events.find(...)</summary>
+<summary>MongoDB query and execution plan</summary>
+
+```json
+{
+  "find": "events",
+  "filter": {
+    "user_id": 1,
+    "event_type": "search",
+    "occurred_at": {
+      "$gte": "2026-10-25 02:14:23.425600+00:00"
+    }
+  },
+  "projection": {
+    "_id": 0,
+    "search_term": 1,
+    "occurred_at": 1
+  }
+}
+```
 
 ```json
 {
@@ -1013,9 +1247,7 @@ MongoDB only. The `(user_id, event_type, occurred_at)` index matches the filter 
         },
         {
           "occurred_at": {
-            "$gte": {
-              "$date": "2026-10-23T17:35:05.452Z"
-            }
+            "$gte": "2026-10-25 02:14:23.425000"
           }
         }
       ]
@@ -1066,7 +1298,7 @@ MongoDB only. The `(user_id, event_type, occurred_at)` index matches the filter 
               "[\"search\", \"search\"]"
             ],
             "occurred_at": [
-              "[new Date(9223372036854775807), new Date(1792776905452)]"
+              "[new Date(9223372036854775807), new Date(1792894463425)]"
             ]
           }
         }
@@ -1087,9 +1319,7 @@ MongoDB only. The `(user_id, event_type, occurred_at)` index matches the filter 
             "$and": [
               {
                 "occurred_at": {
-                  "$gte": {
-                    "$date": "2026-10-23T17:35:05.452Z"
-                  }
+                  "$gte": "2026-10-25 02:14:23.425000"
                 }
               },
               {
@@ -1201,7 +1431,7 @@ MongoDB only. The `(user_id, event_type, occurred_at)` index matches the filter 
               "[\"search\", \"search\"]"
             ],
             "occurred_at": [
-              "[new Date(9223372036854775807), new Date(1792776905452)]"
+              "[new Date(9223372036854775807), new Date(1792894463425)]"
             ]
           },
           "keysExamined": 8,
@@ -1212,259 +1442,1210 @@ MongoDB only. The `(user_id, event_type, occurred_at)` index matches the filter 
       }
     }
   },
-  "queryShapeHash": "478B6CC35C84489F60E2CDD4306882B4811AC47AA717A5A18E448E5DFEEFA007",
-  "command": {
-    "find": "events",
-    "filter": {
-      "user_id": 1,
-      "event_type": "search",
-      "occurred_at": {
-        "$gte": {
-          "$date": "2026-10-23T17:35:05.452Z"
-        }
-      }
-    },
-    "projection": {
-      "_id": 0,
-      "search_term": 1,
-      "occurred_at": 1
-    },
-    "$db": "ecommerce"
-  },
-  "serverInfo": {
-    "host": "63c422aab0b2",
-    "port": 27017,
-    "version": "8.0.38",
-    "gitVersion": "b2f7afe3a6838999fd375c7a7ea678189f795568"
-  },
-  "serverParameters": {
-    "internalQueryFacetBufferSizeBytes": 104857600,
-    "internalQueryFacetMaxOutputDocSizeBytes": 104857600,
-    "internalLookupStageIntermediateDocumentMaxSizeBytes": 104857600,
-    "internalDocumentSourceGroupMaxMemoryBytes": 104857600,
-    "internalQueryMaxBlockingSortMemoryUsageBytes": 104857600,
-    "internalQueryProhibitBlockingMergeOnMongoS": 0,
-    "internalQueryMaxAddToSetBytes": 104857600,
-    "internalDocumentSourceSetWindowFieldsMaxMemoryBytes": 104857600,
-    "internalQueryFrameworkControl": "trySbeRestricted",
-    "internalQueryPlannerIgnoreIndexWithCollationForRegex": 1
-  },
   "ok": 1.0
 }
 ```
 
 </details>
 
-### Query 7: Active carts
+### Query 7: Active carts: device, item count, total
 
-MySQL only. This scans all of `carts` (about 105,000 rows) to find all the active ones, because the only index with `status` starts with `user_id`. The cart items and prices are then found through primary keys.
+MySQL left joins active carts to items and variants, preserving empty carts and summing quantities and current prices.
 
 <details>
-<summary>Raw MySQL EXPLAIN</summary>
+<summary>Results: 3,647 records; first three records shown.</summary>
 
-```sql
-EXPLAIN SELECT c.cart_id, c.user_id, c.last_device, CAST(COALESCE(SUM(i.quantity), 0) AS UNSIGNED) AS item_count, COALESCE(SUM(i.quantity * v.price), 0) AS total_amount FROM carts c LEFT JOIN cart_items i ON i.cart_id = c.cart_id LEFT JOIN product_variants v ON v.variant_id = i.variant_id WHERE c.status = 'active' GROUP BY c.cart_id, c.user_id, c.last_device ORDER BY c.cart_id;
-```
-
-```
-+----+-------------+-------+------------+--------+---------------+---------+---------+------------------------+--------+----------+----------------------------------------------+
-| id | select_type | table | partitions | type   | possible_keys | key     | key_len | ref                    | rows   | filtered | Extra                                        |
-+----+-------------+-------+------------+--------+---------------+---------+---------+------------------------+--------+----------+----------------------------------------------+
-|  1 | SIMPLE      | c     | NULL       | ALL    | NULL          | NULL    | NULL    | NULL                   | 105728 |    33.33 | Using where; Using temporary; Using filesort |
-|  1 | SIMPLE      | i     | NULL       | ref    | PRIMARY       | PRIMARY | 8       | ecommerce.c.cart_id    |      1 |   100.00 | NULL                                         |
-|  1 | SIMPLE      | v     | NULL       | eq_ref | PRIMARY       | PRIMARY | 8       | ecommerce.i.variant_id |      1 |   100.00 | NULL                                         |
-+----+-------------+-------+------------+--------+---------------+---------+---------+------------------------+--------+----------+----------------------------------------------+
+```json
+[
+  {
+    "cart_id": 100001,
+    "user_id": 1,
+    "last_device": "laptop",
+    "item_count": 4,
+    "total_amount": "227.74"
+  },
+  {
+    "cart_id": 100002,
+    "user_id": 4686,
+    "last_device": "phone",
+    "item_count": 1,
+    "total_amount": "162.06"
+  },
+  {
+    "cart_id": 100004,
+    "user_id": 4479,
+    "last_device": "laptop",
+    "item_count": 1,
+    "total_amount": "64.26"
+  }
+]
 ```
 
 </details>
 
-### Query 8: Sarah's orders
-
-MySQL only. Sarah's orders come from `idx_orders_user_date`, and the shipping option, payment, items and variants are all reached through indexes. This query does no table scans.
-
 <details>
-<summary>Raw MySQL EXPLAIN</summary>
+<summary>MySQL query and execution plan</summary>
 
 ```sql
-EXPLAIN SELECT o.order_id, o.placed_at, o.status, o.total_amount, s.name AS shipping_option, pay.method_type AS payment_method, i.product_name_snapshot AS product_name, v.size, v.color, i.quantity, i.unit_price FROM orders o JOIN shipping_options s ON s.shipping_option_id = o.shipping_option_id JOIN payments pay ON pay.order_id = o.order_id JOIN order_items i ON i.order_id = o.order_id JOIN product_variants v ON v.variant_id = i.variant_id WHERE o.user_id = 1 ORDER BY o.placed_at, o.order_id, i.order_item_id;
+SELECT c.cart_id, c.user_id, c.last_device,
+            CAST(COALESCE(SUM(i.quantity), 0) AS UNSIGNED) AS item_count,
+            COALESCE(SUM(i.quantity * v.price), 0) AS total_amount
+        FROM carts c
+        LEFT JOIN cart_items i ON i.cart_id = c.cart_id
+        LEFT JOIN product_variants v ON v.variant_id = i.variant_id
+        WHERE c.status = 'active'
+        GROUP BY c.cart_id, c.user_id, c.last_device
+        ORDER BY c.cart_id
 ```
 
+```json
+[
+  {
+    "id": 1,
+    "select_type": "SIMPLE",
+    "table": "c",
+    "partitions": null,
+    "type": "ALL",
+    "possible_keys": null,
+    "key": null,
+    "key_len": null,
+    "ref": null,
+    "rows": 105728,
+    "filtered": 33.33,
+    "Extra": "Using where; Using temporary; Using filesort"
+  },
+  {
+    "id": 1,
+    "select_type": "SIMPLE",
+    "table": "i",
+    "partitions": null,
+    "type": "ref",
+    "possible_keys": "PRIMARY",
+    "key": "PRIMARY",
+    "key_len": "8",
+    "ref": "ecommerce.c.cart_id",
+    "rows": 1,
+    "filtered": 100.0,
+    "Extra": null
+  },
+  {
+    "id": 1,
+    "select_type": "SIMPLE",
+    "table": "v",
+    "partitions": null,
+    "type": "eq_ref",
+    "possible_keys": "PRIMARY",
+    "key": "PRIMARY",
+    "key_len": "8",
+    "ref": "ecommerce.i.variant_id",
+    "rows": 1,
+    "filtered": 100.0,
+    "Extra": null
+  }
+]
 ```
-+----+-------------+-------+------------+--------+--------------------------------------------------------+-----------------------+---------+--------------------------------+------+----------+---------------------------------+
-| id | select_type | table | partitions | type   | possible_keys                                          | key                   | key_len | ref                            | rows | filtered | Extra                           |
-+----+-------------+-------+------------+--------+--------------------------------------------------------+-----------------------+---------+--------------------------------+------+----------+---------------------------------+
-|  1 | SIMPLE      | o     | NULL       | ref    | PRIMARY,idx_orders_user_date,fk_orders_shipping_option | idx_orders_user_date  | 8       | const                          |   13 |   100.00 | Using temporary; Using filesort |
-|  1 | SIMPLE      | s     | NULL       | eq_ref | PRIMARY                                                | PRIMARY               | 8       | ecommerce.o.shipping_option_id |    1 |   100.00 | NULL                            |
-|  1 | SIMPLE      | pay   | NULL       | ref    | idx_payments_order                                     | idx_payments_order    | 8       | ecommerce.o.order_id           |    1 |   100.00 | NULL                            |
-|  1 | SIMPLE      | i     | NULL       | ref    | idx_order_items_order,idx_order_items_variant          | idx_order_items_order | 8       | ecommerce.o.order_id           |    2 |   100.00 | NULL                            |
-|  1 | SIMPLE      | v     | NULL       | eq_ref | PRIMARY                                                | PRIMARY               | 8       | ecommerce.i.variant_id         |    1 |   100.00 | NULL                            |
-+----+-------------+-------+------------+--------+--------------------------------------------------------+-----------------------+---------+--------------------------------+------+----------+---------------------------------+
+
+</details>
+
+### Query 8: Sarah's orders with items, payment, shipping, status
+
+A correlated subquery selects one payment_id per order, prioritizing successful payment states. The left join prevents missing payments from removing orders and avoids multiplying item rows across attempts.
+
+<details>
+<summary>Results: 13 records; complete output.</summary>
+
+```json
+[
+  {
+    "order_id": 95177,
+    "placed_at": "2025-12-01 10:09:32.836195",
+    "status": "delivered",
+    "total_amount": "465.97",
+    "shipping_option": "Express",
+    "payment_method": "bank_account",
+    "items": [
+      {
+        "product_name": "Running Shoes 00119",
+        "size": null,
+        "color": null,
+        "quantity": 1,
+        "unit_price": "218.89"
+      },
+      {
+        "product_name": "Decorative Vase 00219",
+        "size": null,
+        "color": "blue",
+        "quantity": 2,
+        "unit_price": "100.27"
+      }
+    ]
+  },
+  {
+    "order_id": 1,
+    "placed_at": "2025-12-15 19:51:24.982009",
+    "status": "delivered",
+    "total_amount": "225.87",
+    "shipping_option": "Overnight",
+    "payment_method": "credit_card",
+    "items": [
+      {
+        "product_name": "Studio Headphones 03137",
+        "size": null,
+        "color": "black",
+        "quantity": 2,
+        "unit_price": "93.00"
+      }
+    ]
+  },
+  {
+    "order_id": 13760,
+    "placed_at": "2026-01-01 06:04:09.187906",
+    "status": "delivered",
+    "total_amount": "382.41",
+    "shipping_option": "Overnight",
+    "payment_method": "credit_card",
+    "items": [
+      {
+        "product_name": "Water Bottle 02191",
+        "size": null,
+        "color": null,
+        "quantity": 2,
+        "unit_price": "165.47"
+      }
+    ]
+  },
+  {
+    "order_id": 25257,
+    "placed_at": "2026-01-16 16:59:31.231025",
+    "status": "delivered",
+    "total_amount": "209.02",
+    "shipping_option": "Express",
+    "payment_method": "bank_account",
+    "items": [
+      {
+        "product_name": "Coffee Grinder 00093",
+        "size": null,
+        "color": null,
+        "quantity": 1,
+        "unit_price": "95.23"
+      },
+      {
+        "product_name": "Skin Cleanser 01334",
+        "size": null,
+        "color": null,
+        "quantity": 1,
+        "unit_price": "49.62"
+      },
+      {
+        "product_name": "Notebook 00624",
+        "size": null,
+        "color": null,
+        "quantity": 1,
+        "unit_price": "36.66"
+      }
+    ]
+  },
+  {
+    "order_id": 2,
+    "placed_at": "2026-02-13 19:51:24.982009",
+    "status": "delivered",
+    "total_amount": "204.21",
+    "shipping_option": "Standard",
+    "payment_method": "credit_card",
+    "items": [
+      {
+        "product_name": "Notebook 02976",
+        "size": null,
+        "color": null,
+        "quantity": 2,
+        "unit_price": "75.49"
+      },
+      {
+        "product_name": "Decorative Vase 00619",
+        "size": null,
+        "color": "blue",
+        "quantity": 2,
+        "unit_price": "16.28"
+      }
+    ]
+  },
+  {
+    "order_id": 32814,
+    "placed_at": "2026-02-19 20:48:27.177345",
+    "status": "delivered",
+    "total_amount": "243.95",
+    "shipping_option": "Overnight",
+    "payment_method": "bank_account",
+    "items": [
+      {
+        "product_name": "Stoneware Vase 03907",
+        "size": null,
+        "color": "blue",
+        "quantity": 2,
+        "unit_price": "101.37"
+      }
+    ]
+  },
+  {
+    "order_id": 31750,
+    "placed_at": "2026-03-05 09:22:28.199958",
+    "status": "delivered",
+    "total_amount": "300.68",
+    "shipping_option": "Standard",
+    "payment_method": "bank_account",
+    "items": [
+      {
+        "product_name": "Cookbook 00648",
+        "size": null,
+        "color": null,
+        "quantity": 1,
+        "unit_price": "34.83"
+      },
+      {
+        "product_name": "Paperback Novel 00240",
+        "size": null,
+        "color": null,
+        "quantity": 1,
+        "unit_price": "71.67"
+      },
+      {
+        "product_name": "Running Shoes 03831",
+        "size": null,
+        "color": null,
+        "quantity": 2,
+        "unit_price": "83.18"
+      }
+    ]
+  },
+  {
+    "order_id": 3,
+    "placed_at": "2026-04-24 19:51:24.982009",
+    "status": "delivered",
+    "total_amount": "452.28",
+    "shipping_option": "Overnight",
+    "payment_method": "credit_card",
+    "items": [
+      {
+        "product_name": "Ceramic Vase 02739",
+        "size": null,
+        "color": "white",
+        "quantity": 1,
+        "unit_price": "198.18"
+      },
+      {
+        "product_name": "Skin Cleanser 04342",
+        "size": null,
+        "color": null,
+        "quantity": 2,
+        "unit_price": "98.73"
+      }
+    ]
+  },
+  {
+    "order_id": 85616,
+    "placed_at": "2026-04-28 06:24:56.358020",
+    "status": "delivered",
+    "total_amount": "507.86",
+    "shipping_option": "Overnight",
+    "payment_method": "credit_card",
+    "items": [
+      {
+        "product_name": "Notebook 03712",
+        "size": null,
+        "color": null,
+        "quantity": 2,
+        "unit_price": "52.39"
+      },
+      {
+        "product_name": "Ceramic Vase 04555",
+        "size": null,
+        "color": "white",
+        "quantity": 2,
+        "unit_price": "171.16"
+      }
+    ]
+  },
+  {
+    "order_id": 4,
+    "placed_at": "2026-07-13 19:51:24.982009",
+    "status": "delivered",
+    "total_amount": "338.80",
+    "shipping_option": "Express",
+    "payment_method": "credit_card",
+    "items": [
+      {
+        "product_name": "Summer Dress",
+        "size": "Large",
+        "color": "blue",
+        "quantity": 2,
+        "unit_price": "150.84"
+      }
+    ]
+  },
+  {
+    "order_id": 5,
+    "placed_at": "2026-10-11 19:51:24.982009",
+    "status": "delivered",
+    "total_amount": "402.85",
+    "shipping_option": "Express",
+    "payment_method": "credit_card",
+    "items": [
+      {
+        "product_name": "Wireless Headphones",
+        "size": null,
+        "color": "blue",
+        "quantity": 1,
+        "unit_price": "37.66"
+      },
+      {
+        "product_name": "Summer Dress",
+        "size": "Small",
+        "color": "aqua-blue",
+        "quantity": 2,
+        "unit_price": "149.77"
+      },
+      {
+        "product_name": "Ceramic Vase",
+        "size": null,
+        "color": "white",
+        "quantity": 1,
+        "unit_price": "23.78"
+      }
+    ]
+  },
+  {
+    "order_id": 6,
+    "placed_at": "2026-11-02 19:51:24.982009",
+    "status": "delivered",
+    "total_amount": "676.12",
+    "shipping_option": "Overnight",
+    "payment_method": "credit_card",
+    "items": [
+      {
+        "product_name": "Decorative Vase 04179",
+        "size": null,
+        "color": "white",
+        "quantity": 2,
+        "unit_price": "205.34"
+      },
+      {
+        "product_name": "Studio Headphones 00777",
+        "size": null,
+        "color": "black",
+        "quantity": 1,
+        "unit_price": "15.36"
+      },
+      {
+        "product_name": "Portable Speaker 00020",
+        "size": null,
+        "color": null,
+        "quantity": 1,
+        "unit_price": "176.86"
+      }
+    ]
+  },
+  {
+    "order_id": 7,
+    "placed_at": "2026-11-15 19:51:24.982009",
+    "status": "processing",
+    "total_amount": "714.44",
+    "shipping_option": "Express",
+    "payment_method": "credit_card",
+    "items": [
+      {
+        "product_name": "Studio Headphones 02057",
+        "size": null,
+        "color": "blue",
+        "quantity": 1,
+        "unit_price": "111.68"
+      },
+      {
+        "product_name": "Summer Dress 02018",
+        "size": "Large",
+        "color": "blue",
+        "quantity": 2,
+        "unit_price": "177.00"
+      },
+      {
+        "product_name": "Cotton Dress 03666",
+        "size": "Large",
+        "color": "black",
+        "quantity": 1,
+        "unit_price": "183.81"
+      }
+    ]
+  }
+]
+```
+
+</details>
+
+<details>
+<summary>MySQL query and execution plan</summary>
+
+```sql
+SELECT o.order_id, o.placed_at, o.status, o.total_amount,
+            s.name AS shipping_option, pay.method_type AS payment_method,
+            i.product_name_snapshot AS product_name, v.size, v.color,
+            i.quantity, i.unit_price
+        FROM orders o
+        JOIN shipping_options s ON s.shipping_option_id = o.shipping_option_id
+        LEFT JOIN payments pay ON pay.payment_id = (
+            SELECT candidate.payment_id
+            FROM payments candidate
+            WHERE candidate.order_id = o.order_id
+            ORDER BY
+                (candidate.status IN ('approved', 'refunded', 'partially_refunded')) DESC,
+                candidate.created_at DESC, candidate.payment_id DESC
+            LIMIT 1
+        )
+        JOIN order_items i ON i.order_id = o.order_id
+        JOIN product_variants v ON v.variant_id = i.variant_id
+        WHERE o.user_id = %s
+        ORDER BY o.placed_at, o.order_id, i.order_item_id
+```
+
+Parameters: `[1]`.
+
+```json
+[
+  {
+    "id": 1,
+    "select_type": "PRIMARY",
+    "table": "o",
+    "partitions": null,
+    "type": "ref",
+    "possible_keys": "PRIMARY,idx_orders_user_date,fk_orders_shipping_option",
+    "key": "idx_orders_user_date",
+    "key_len": "8",
+    "ref": "const",
+    "rows": 13,
+    "filtered": 100.0,
+    "Extra": "Using temporary; Using filesort"
+  },
+  {
+    "id": 1,
+    "select_type": "PRIMARY",
+    "table": "s",
+    "partitions": null,
+    "type": "eq_ref",
+    "possible_keys": "PRIMARY",
+    "key": "PRIMARY",
+    "key_len": "8",
+    "ref": "ecommerce.o.shipping_option_id",
+    "rows": 1,
+    "filtered": 100.0,
+    "Extra": null
+  },
+  {
+    "id": 1,
+    "select_type": "PRIMARY",
+    "table": "pay",
+    "partitions": null,
+    "type": "eq_ref",
+    "possible_keys": "PRIMARY",
+    "key": "PRIMARY",
+    "key_len": "8",
+    "ref": "func",
+    "rows": 1,
+    "filtered": 100.0,
+    "Extra": "Using where"
+  },
+  {
+    "id": 1,
+    "select_type": "PRIMARY",
+    "table": "i",
+    "partitions": null,
+    "type": "ref",
+    "possible_keys": "idx_order_items_order,idx_order_items_variant",
+    "key": "idx_order_items_order",
+    "key_len": "8",
+    "ref": "ecommerce.o.order_id",
+    "rows": 2,
+    "filtered": 100.0,
+    "Extra": null
+  },
+  {
+    "id": 1,
+    "select_type": "PRIMARY",
+    "table": "v",
+    "partitions": null,
+    "type": "eq_ref",
+    "possible_keys": "PRIMARY",
+    "key": "PRIMARY",
+    "key_len": "8",
+    "ref": "ecommerce.i.variant_id",
+    "rows": 1,
+    "filtered": 100.0,
+    "Extra": null
+  },
+  {
+    "id": 2,
+    "select_type": "DEPENDENT SUBQUERY",
+    "table": "candidate",
+    "partitions": null,
+    "type": "ref",
+    "possible_keys": "idx_payments_order",
+    "key": "idx_payments_order",
+    "key_len": "8",
+    "ref": "ecommerce.o.order_id",
+    "rows": 1,
+    "filtered": 100.0,
+    "Extra": "Using filesort"
+  }
+]
 ```
 
 </details>
 
 ### Query 9: Sarah's returns
 
-MySQL only. Everything is reached through indexes: First with Sarah's orders through `idx_orders_user_date` alone, then their items through `idx_order_items_order`, then the returns through `idx_returns_order_item`.
+MySQL joins Sarah’s orders to returned order items and exposes return, refund, and exchange statuses and amounts.
 
 <details>
-<summary>Raw MySQL EXPLAIN</summary>
+<summary>Results: 2 records; complete output.</summary>
+
+```json
+[
+  {
+    "return_id": 1,
+    "order_id": 4,
+    "product_name": "Summer Dress",
+    "quantity": 1,
+    "resolution": "refund",
+    "status": "completed",
+    "refund_status": "processed",
+    "exchange_status": "not_applicable",
+    "refund_amount": "143.30",
+    "restocking_fee": "7.54",
+    "requested_at": "2026-07-25 19:51:24.982009"
+  },
+  {
+    "return_id": 2,
+    "order_id": 5,
+    "product_name": "Summer Dress",
+    "quantity": 1,
+    "resolution": "exchange",
+    "status": "completed",
+    "refund_status": "not_applicable",
+    "exchange_status": "completed",
+    "refund_amount": "0.00",
+    "restocking_fee": "0.00",
+    "requested_at": "2026-10-23 19:51:24.982009"
+  }
+]
+```
+
+</details>
+
+<details>
+<summary>MySQL query and execution plan</summary>
 
 ```sql
-EXPLAIN SELECT r.return_id, o.order_id, i.product_name_snapshot AS product_name, r.quantity, r.resolution, r.status, r.refund_status, r.exchange_status, r.refund_amount, r.restocking_fee, r.requested_at FROM `returns` r JOIN order_items i ON i.order_item_id = r.order_item_id JOIN orders o ON o.order_id = i.order_id WHERE o.user_id = 1 ORDER BY r.requested_at;
+SELECT r.return_id, o.order_id, i.product_name_snapshot AS product_name,
+            r.quantity, r.resolution, r.status, r.refund_status, r.exchange_status,
+            r.refund_amount, r.restocking_fee, r.requested_at
+        FROM `returns` r
+        JOIN order_items i ON i.order_item_id = r.order_item_id
+        JOIN orders o ON o.order_id = i.order_id
+        WHERE o.user_id = %s
+        ORDER BY r.requested_at
 ```
 
-```
-+----+-------------+-------+------------+------+-------------------------------+------------------------+---------+---------------------------+------+----------+----------------------------------------------+
-| id | select_type | table | partitions | type | possible_keys                 | key                    | key_len | ref                       | rows | filtered | Extra                                        |
-+----+-------------+-------+------------+------+-------------------------------+------------------------+---------+---------------------------+------+----------+----------------------------------------------+
-|  1 | SIMPLE      | o     | NULL       | ref  | PRIMARY,idx_orders_user_date  | idx_orders_user_date   | 8       | const                     |   13 |   100.00 | Using index; Using temporary; Using filesort |
-|  1 | SIMPLE      | i     | NULL       | ref  | PRIMARY,idx_order_items_order | idx_order_items_order  | 8       | ecommerce.o.order_id      |    2 |   100.00 | NULL                                         |
-|  1 | SIMPLE      | r     | NULL       | ref  | idx_returns_order_item        | idx_returns_order_item | 8       | ecommerce.i.order_item_id |    1 |   100.00 | NULL                                         |
-+----+-------------+-------+------------+------+-------------------------------+------------------------+---------+---------------------------+------+----------+----------------------------------------------+
+Parameters: `[1]`.
+
+```json
+[
+  {
+    "id": 1,
+    "select_type": "SIMPLE",
+    "table": "o",
+    "partitions": null,
+    "type": "ref",
+    "possible_keys": "PRIMARY,idx_orders_user_date",
+    "key": "idx_orders_user_date",
+    "key_len": "8",
+    "ref": "const",
+    "rows": 13,
+    "filtered": 100.0,
+    "Extra": "Using index; Using temporary; Using filesort"
+  },
+  {
+    "id": 1,
+    "select_type": "SIMPLE",
+    "table": "i",
+    "partitions": null,
+    "type": "ref",
+    "possible_keys": "PRIMARY,idx_order_items_order",
+    "key": "idx_order_items_order",
+    "key_len": "8",
+    "ref": "ecommerce.o.order_id",
+    "rows": 2,
+    "filtered": 100.0,
+    "Extra": null
+  },
+  {
+    "id": 1,
+    "select_type": "SIMPLE",
+    "table": "r",
+    "partitions": null,
+    "type": "ref",
+    "possible_keys": "idx_returns_order_item",
+    "key": "idx_returns_order_item",
+    "key_len": "8",
+    "ref": "ecommerce.i.order_item_id",
+    "rows": 1,
+    "filtered": 100.0,
+    "Extra": null
+  }
+]
 ```
 
 </details>
 
 ### Query 10: Average days between Sarah's purchases
 
-MySQL only. One lookup on `idx_orders_user_date` returns Sarah's orders already in date order, so no sorting is needed. The gaps between dates are calculated in Python.
+MySQL returns Sarah’s non-cancelled purchase times in order; Python averages consecutive elapsed-time gaps in days.
 
 <details>
-<summary>Raw MySQL EXPLAIN</summary>
+<summary>Results: 1 record; complete output.</summary>
 
-```sql
-EXPLAIN SELECT placed_at FROM orders WHERE user_id = 1 AND status <> 'cancelled' ORDER BY placed_at;
-```
-
-```
-+----+-------------+--------+------------+------+----------------------------------------+----------------------+---------+-------+------+----------+-------------+
-| id | select_type | table  | partitions | type | possible_keys                          | key                  | key_len | ref   | rows | filtered | Extra       |
-+----+-------------+--------+------------+------+----------------------------------------+----------------------+---------+-------+------+----------+-------------+
-|  1 | SIMPLE      | orders | NULL       | ref  | idx_orders_user_date,idx_orders_status | idx_orders_user_date | 8       | const |   13 |    83.33 | Using where |
-+----+-------------+--------+------------+------+----------------------------------------+----------------------+---------+-------+------+----------+-------------+
+```json
+[
+  {
+    "orders": 13,
+    "avg_days_between_purchases": 29.12
+  }
+]
 ```
 
 </details>
 
-### Query 11: Carts created in 30 days that never converted
-
-MySQL only. The 30-day-window is a range scan on `idx_carts_created`. Each cart is checked against the unique `cart_id` index on `orders` to see whether an order exists. MySQL estimates about 38,000 rows for the range scan, but the query actually matches about 18,500 carts.
-
 <details>
-<summary>Raw MySQL EXPLAIN</summary>
+<summary>MySQL query and execution plan</summary>
 
 ```sql
-EXPLAIN SELECT COUNT(*) AS carts_created, CAST(COALESCE(SUM(o.order_id IS NULL), 0) AS UNSIGNED) AS never_converted FROM carts c LEFT JOIN orders o ON o.cart_id = c.cart_id WHERE c.created_at >= NOW() - INTERVAL 30 DAY;
+SELECT placed_at FROM orders WHERE user_id = %s AND status <> 'cancelled' ORDER BY placed_at
 ```
 
+Parameters: `[1]`.
+
+```json
+[
+  {
+    "id": 1,
+    "select_type": "SIMPLE",
+    "table": "orders",
+    "partitions": null,
+    "type": "ref",
+    "possible_keys": "idx_orders_user_date,idx_orders_status",
+    "key": "idx_orders_user_date",
+    "key_len": "8",
+    "ref": "const",
+    "rows": 13,
+    "filtered": 83.33,
+    "Extra": "Using where"
+  }
+]
 ```
-+----+-------------+-------+------------+--------+-------------------+-------------------+---------+---------------------+-------+----------+--------------------------+
-| id | select_type | table | partitions | type   | possible_keys     | key               | key_len | ref                 | rows  | filtered | Extra                    |
-+----+-------------+-------+------------+--------+-------------------+-------------------+---------+---------------------+-------+----------+--------------------------+
-|  1 | SIMPLE      | c     | NULL       | range  | idx_carts_created | idx_carts_created | 8       | NULL                | 38274 |   100.00 | Using where; Using index |
-|  1 | SIMPLE      | o     | NULL       | eq_ref | cart_id           | cart_id           | 8       | ecommerce.c.cart_id |     1 |   100.00 | Using index              |
-+----+-------------+-------+------------+--------+-------------------+-------------------+---------+---------------------+-------+----------+--------------------------+
+
+</details>
+
+### Query 11: % of carts (30 days) never converted
+
+MySQL counts recent carts and those without an associated order; Python calculates the percentage.
+
+<details>
+<summary>Results: 1 record; complete output.</summary>
+
+```json
+[
+  {
+    "carts_created": 16521,
+    "never_converted": 5357,
+    "percent_never_converted": 32.43
+  }
+]
+```
+
+</details>
+
+<details>
+<summary>MySQL query and execution plan</summary>
+
+```sql
+SELECT COUNT(*) AS carts_created,
+            CAST(COALESCE(SUM(o.order_id IS NULL), 0) AS UNSIGNED) AS never_converted
+        FROM carts c
+        LEFT JOIN orders o ON o.cart_id = c.cart_id
+        WHERE c.created_at >= NOW() - INTERVAL 30 DAY
+```
+
+```json
+[
+  {
+    "id": 1,
+    "select_type": "SIMPLE",
+    "table": "c",
+    "partitions": null,
+    "type": "range",
+    "possible_keys": "idx_carts_created",
+    "key": "idx_carts_created",
+    "key_len": "8",
+    "ref": null,
+    "rows": 32968,
+    "filtered": 100.0,
+    "Extra": "Using where; Using index"
+  },
+  {
+    "id": 1,
+    "select_type": "SIMPLE",
+    "table": "o",
+    "partitions": null,
+    "type": "eq_ref",
+    "possible_keys": "cart_id",
+    "key": "cart_id",
+    "key_len": "8",
+    "ref": "ecommerce.c.cart_id",
+    "rows": 1,
+    "filtered": 100.0,
+    "Extra": "Using index"
+  }
+]
 ```
 
 </details>
 
 ### Query 12: Top 3 products bought with headphones
 
-Neo4j only. It finds the Headphones category through the category name index, follows it to its products and all orders that contain them, then to every product in those orders (52,671 rows). Removing the other headphones is the most expensive step. The rest are grouped by product and the top 3 kept.
+Neo4j traverses from headphones products to non-cancelled orders and other distinct products. Counting distinct orders prevents multiple matching headphones or variant lines from inflating co-purchase frequency.
 
 <details>
-<summary>Raw Neo4j PROFILE</summary>
+<summary>Results: 3 records; complete output.</summary>
+
+```json
+[
+  {
+    "product_id": 5000,
+    "name": "Notebook 05000",
+    "orders_together": 17
+  },
+  {
+    "product_id": 600,
+    "name": "Cookbook 00600",
+    "orders_together": 16
+  },
+  {
+    "product_id": 4526,
+    "name": "Hair Brush 04526",
+    "orders_together": 16
+  }
+]
+```
+
+</details>
+
+<details>
+<summary>Neo4j query and execution plan</summary>
 
 ```cypher
-PROFILE MATCH (:Category {name: 'Headphones'})<-[:IN_CATEGORY]-(:Product)<-[:CONTAINS]-(o:Order) WITH DISTINCT o MATCH (o)-[:CONTAINS]->(other:Product) WHERE NOT (other)-[:IN_CATEGORY]->(:Category {name: 'Headphones'}) RETURN other.product_id AS product_id, other.name AS name, count(DISTINCT o) AS orders_together ORDER BY orders_together DESC, product_id LIMIT 3;
+MATCH (:Category {name: 'Headphones'})<-[:IN_CATEGORY]-(headphones:Product)<-[:CONTAINS]-(o:Order)
+            WHERE o.status <> 'cancelled'
+            WITH DISTINCT o, headphones
+            MATCH (o)-[:CONTAINS]->(other:Product)
+            WHERE other.product_id <> headphones.product_id
+            RETURN other.product_id AS product_id, other.name AS name,
+                count(DISTINCT o) AS orders_together
+            ORDER BY orders_together DESC, product_id
+            LIMIT 3
 ```
 
-```
-+------------------------------------------------------+
-| product_id | name                  | orders_together |
-+------------------------------------------------------+
-| 5000       | "Notebook 05000"      | 18              |
-| 966        | "Skin Cleanser 00966" | 17              |
-| 600        | "Cookbook 00600"      | 16              |
-+------------------------------------------------------+
-
-+-------------------------------------------------------------------------------------------------+
-| Plan      | Statement   | Version | Planner | Runtime   | Time | DbHits | Rows | Memory (Bytes) |
-+-------------------------------------------------------------------------------------------------+
-| "PROFILE" | "READ_ONLY" | "5"     | "COST"  | "SLOTTED" | 150  | 631794 | 3    | 3255368        |
-+-------------------------------------------------------------------------------------------------+
-
-
-Cypher 5
-
-Planner COST
-
-Runtime SLOTTED
-
-Runtime version 5.26.33
-
-+-------------------+----+------------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+
-| Operator          | Id | Details                                                                                              | Estimated Rows | Rows  | DB Hits | Memory (Bytes) | Page Cache Hits/Misses | Ordered by                           |
-+-------------------+----+------------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+
-| +ProduceResults   |  0 | product_id, name, orders_together                                                                    |              3 |     3 |       0 |              0 |                    0/0 |                                      |
-| |                 +----+------------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+                                      |
-| +Top              |  1 | orders_together DESC, product_id ASC LIMIT 3                                                         |              3 |     3 |       0 |            880 |                    0/0 | orders_together DESC, product_id ASC |
-| |                 +----+------------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+
-| +EagerAggregation |  2 | cache[other.product_id] AS product_id, cache[other.name] AS name, count(DISTINCT o) AS orders_togeth |             69 |  4368 |       0 |        2686752 |                    0/0 |                                      |
-| |                 |    | er                                                                                                   |                |       |         |                |                        |                                      |
-| |                 +----+------------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+
-| +CacheProperties  |  3 | cache[other.product_id], cache[other.name]                                                           |           4703 | 27791 |   55582 |                |                    0/0 |                                      |
-| |                 +----+------------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+
-| +Filter           |  4 | other:Product                                                                                        |           4703 | 27791 |   27791 |                |                    0/0 |                                      |
-| |                 +----+------------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+
-| +AntiSemiApply    |  5 |                                                                                                      |           4770 | 27791 |       0 |                |                    0/0 |                                      |
-| |\                +----+------------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+
-| | +Expand(Into)   |  6 | (other)-[anon_5:IN_CATEGORY]->(anon_6)                                                               |              3 |     0 |  291146 |            904 |                    0/0 |                                      |
-| | |               +----+------------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+
-| | +NodeIndexSeek  |  7 | RANGE INDEX anon_6:Category(name) WHERE name = $autostring_1                                         |            596 | 52671 |  105342 |                |                    0/0 |                                      |
-| |                 +----+------------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+
-| +Expand(All)      |  8 | (o)-[anon_4:CONTAINS]->(other)                                                                       |           4771 | 52671 |   98419 |                |                    0/0 |                                      |
-| |                 +----+------------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+
-| +Distinct         |  9 | o                                                                                                    |           2380 | 22874 |       0 |         786512 |                    0/0 |                                      |
-| |                 +----+------------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+
-| +Filter           | 10 | o:Order                                                                                              |           2505 | 24880 |   24880 |                |                    0/0 |                                      |
-| |                 +----+------------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+
-| +Expand(All)      | 11 | (anon_2)<-[anon_3:CONTAINS]-(o)                                                                      |           2505 | 24880 |   27380 |                |                    0/0 |                                      |
-| |                 +----+------------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+
-| +Filter           | 12 | anon_2:Product                                                                                       |             63 |   625 |     625 |                |                    0/0 |                                      |
-| |                 +----+------------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+
-| +Expand(All)      | 13 | (anon_0)<-[anon_1:IN_CATEGORY]-(anon_2)                                                              |             63 |   625 |     627 |                |                    0/0 |                                      |
-| |                 +----+------------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+
-| +NodeIndexSeek    | 14 | RANGE INDEX anon_0:Category(name) WHERE name = $autostring_0                                         |              0 |     1 |       2 |                |                    0/0 |                                      |
-+-------------------+----+------------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+
-
-Total database accesses: 631794, total allocated memory: 3255368
-
-3 rows
-ready to start consuming query after 1 ms, results consumed after another 149 ms
+```json
+{
+  "args": {
+    "Order": "orders_together DESC, product_id ASC",
+    "GlobalMemory": 4486752,
+    "planner-impl": "IDP",
+    "Memory": 0,
+    "string-representation": "Cypher 5\n\nPlanner COST\n\nRuntime SLOTTED\n\nRuntime version 5.26.33\n\n+-------------------+----+-------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+\n| Operator          | Id | Details                                                                                         | Estimated Rows | Rows  | DB Hits | Memory (Bytes) | Page Cache Hits/Misses | Ordered by                           |\n+-------------------+----+-------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+\n| +ProduceResults   |  0 | product_id, name, orders_together                                                               |              3 |     3 |       0 |              0 |                    0/0 |                                      |\n| |                 +----+-------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+                                      |\n| +Top              |  1 | orders_together DESC, product_id ASC LIMIT 3                                                    |              3 |     3 |       0 |            880 |                    0/0 | orders_together DESC, product_id ASC |\n| |                 +----+-------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+\n| +EagerAggregation |  2 | cache[other.product_id] AS product_id, other.name AS name, count(DISTINCT o) AS orders_together |             48 |  4990 |   31967 |        3017880 |                    0/0 |                                      |\n| |                 +----+-------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+\n| +Filter           |  3 | NOT cache[other.product_id] = cache[headphones.product_id] AND other:Product                    |           2266 | 31967 |   87820 |                |                    0/0 |                                      |\n| |                 +----+-------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+\n| +Expand(All)      |  4 | (o)-[anon_3:CONTAINS]->(other)                                                                  |           2266 | 55853 |  103625 |                |                    0/0 |                                      |\n| |                 +----+-------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+\n| +Distinct         |  5 | o, headphones                                                                                   |           1131 | 23886 |       0 |        1468816 |                    0/0 |                                      |\n| |                 +----+-------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+\n| +Filter           |  6 | NOT o.status = $autostring_1 AND o:Order                                                        |           1190 | 23886 |   48766 |                |                    0/0 |                                      |\n| |                 +----+-------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+\n| +Expand(All)      |  7 | (headphones)<-[anon_2:CONTAINS]-(o)                                                             |           2505 | 24880 |   27380 |                |                    0/0 |                                      |\n| |                 +----+-------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+\n| +CacheProperties  |  8 | cache[headphones.product_id]                                                                    |             63 |   625 |     625 |                |                    0/0 |                                      |\n| |                 +----+-------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+\n| +Filter           |  9 | headphones:Product                                                                              |             63 |   625 |     625 |                |                    0/0 |                                      |\n| |                 +----+-------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+\n| +Expand(All)      | 10 | (anon_0)<-[anon_1:IN_CATEGORY]-(headphones)                                                     |             63 |   625 |     627 |                |                    0/0 |                                      |\n| |                 +----+-------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+\n| +NodeIndexSeek    | 11 | RANGE INDEX anon_0:Category(name) WHERE name = $autostring_0                                    |              0 |     1 |       2 |                |                    0/0 |                                      |\n+-------------------+----+-------------------------------------------------------------------------------------------------+----------------+-------+---------+----------------+------------------------+--------------------------------------+\n\nTotal database accesses: 301437, total allocated memory: 4486752\n",
+    "runtime": "SLOTTED",
+    "runtime-impl": "SLOTTED",
+    "version": "5",
+    "DbHits": 0,
+    "Details": "product_id, name, orders_together",
+    "planner-version": "5.26.33",
+    "runtime-version": "5.26.33",
+    "Id": 0,
+    "EstimatedRows": 3.0,
+    "planner": "COST",
+    "PageCacheMisses": 0,
+    "Rows": 3,
+    "PageCacheHits": 0
+  },
+  "pageCacheMisses": 0,
+  "children": [
+    {
+      "args": {
+        "Order": "orders_together DESC, product_id ASC",
+        "Details": "orders_together DESC, product_id ASC LIMIT 3",
+        "Memory": 880,
+        "Id": 1,
+        "EstimatedRows": 3.0,
+        "PageCacheMisses": 0,
+        "DbHits": 0,
+        "Rows": 3,
+        "PageCacheHits": 0
+      },
+      "pageCacheMisses": 0,
+      "children": [
+        {
+          "args": {
+            "Details": "cache[other.product_id] AS product_id, other.name AS name, count(DISTINCT o) AS orders_together",
+            "Memory": 3017880,
+            "Id": 2,
+            "EstimatedRows": 47.59878940695845,
+            "PageCacheMisses": 0,
+            "DbHits": 31967,
+            "Rows": 4990,
+            "PageCacheHits": 0
+          },
+          "pageCacheMisses": 0,
+          "children": [
+            {
+              "args": {
+                "Details": "NOT cache[other.product_id] = cache[headphones.product_id] AND other:Product",
+                "Id": 3,
+                "PageCacheMisses": 0,
+                "EstimatedRows": 2265.64475300798,
+                "DbHits": 87820,
+                "Rows": 31967,
+                "PageCacheHits": 0
+              },
+              "pageCacheMisses": 0,
+              "children": [
+                {
+                  "args": {
+                    "Details": "(o)-[anon_3:CONTAINS]->(other)",
+                    "Id": 4,
+                    "PageCacheMisses": 0,
+                    "EstimatedRows": 2266.0979726025002,
+                    "DbHits": 103625,
+                    "Rows": 55853,
+                    "PageCacheHits": 0
+                  },
+                  "pageCacheMisses": 0,
+                  "children": [
+                    {
+                      "args": {
+                        "Details": "o, headphones",
+                        "Memory": 1468816,
+                        "Id": 5,
+                        "EstimatedRows": 1130.5843125000001,
+                        "PageCacheMisses": 0,
+                        "DbHits": 0,
+                        "Rows": 23886,
+                        "PageCacheHits": 0
+                      },
+                      "pageCacheMisses": 0,
+                      "children": [
+                        {
+                          "args": {
+                            "Details": "NOT o.status = $autostring_1 AND o:Order",
+                            "Id": 6,
+                            "PageCacheMisses": 0,
+                            "EstimatedRows": 1190.0887500000001,
+                            "DbHits": 48766,
+                            "Rows": 23886,
+                            "PageCacheHits": 0
+                          },
+                          "pageCacheMisses": 0,
+                          "children": [
+                            {
+                              "args": {
+                                "Details": "(headphones)<-[anon_2:CONTAINS]-(o)",
+                                "Id": 7,
+                                "PageCacheMisses": 0,
+                                "EstimatedRows": 2505.4500000000003,
+                                "DbHits": 27380,
+                                "Rows": 24880,
+                                "PageCacheHits": 0
+                              },
+                              "pageCacheMisses": 0,
+                              "children": [
+                                {
+                                  "args": {
+                                    "Details": "cache[headphones.product_id]",
+                                    "Id": 8,
+                                    "PageCacheMisses": 0,
+                                    "EstimatedRows": 62.5,
+                                    "DbHits": 625,
+                                    "Rows": 625,
+                                    "PageCacheHits": 0
+                                  },
+                                  "pageCacheMisses": 0,
+                                  "children": [
+                                    {
+                                      "args": {
+                                        "Details": "headphones:Product",
+                                        "Id": 9,
+                                        "PageCacheMisses": 0,
+                                        "EstimatedRows": 62.5,
+                                        "DbHits": 625,
+                                        "Rows": 625,
+                                        "PageCacheHits": 0
+                                      },
+                                      "pageCacheMisses": 0,
+                                      "children": [
+                                        {
+                                          "args": {
+                                            "Details": "(anon_0)<-[anon_1:IN_CATEGORY]-(headphones)",
+                                            "Id": 10,
+                                            "PageCacheMisses": 0,
+                                            "EstimatedRows": 62.5,
+                                            "DbHits": 627,
+                                            "Rows": 625,
+                                            "PageCacheHits": 0
+                                          },
+                                          "pageCacheMisses": 0,
+                                          "children": [
+                                            {
+                                              "args": {
+                                                "Details": "RANGE INDEX anon_0:Category(name) WHERE name = $autostring_0",
+                                                "Id": 11,
+                                                "PageCacheMisses": 0,
+                                                "EstimatedRows": 0.125,
+                                                "DbHits": 2,
+                                                "Rows": 1,
+                                                "PageCacheHits": 0
+                                              },
+                                              "pageCacheMisses": 0,
+                                              "dbHits": 2,
+                                              "identifiers": [
+                                                "anon_0"
+                                              ],
+                                              "operatorType": "NodeIndexSeek@neo4j",
+                                              "rows": 1,
+                                              "pageCacheHitRatio": 0.0,
+                                              "pageCacheHits": 0
+                                            }
+                                          ],
+                                          "dbHits": 627,
+                                          "identifiers": [
+                                            "anon_0",
+                                            "anon_1",
+                                            "headphones"
+                                          ],
+                                          "operatorType": "Expand(All)@neo4j",
+                                          "rows": 625,
+                                          "pageCacheHitRatio": 0.0,
+                                          "pageCacheHits": 0
+                                        }
+                                      ],
+                                      "dbHits": 625,
+                                      "identifiers": [
+                                        "anon_0",
+                                        "anon_1",
+                                        "headphones"
+                                      ],
+                                      "operatorType": "Filter@neo4j",
+                                      "rows": 625,
+                                      "pageCacheHitRatio": 0.0,
+                                      "pageCacheHits": 0
+                                    }
+                                  ],
+                                  "dbHits": 625,
+                                  "identifiers": [
+                                    "anon_0",
+                                    "anon_1",
+                                    "headphones"
+                                  ],
+                                  "operatorType": "CacheProperties@neo4j",
+                                  "rows": 625,
+                                  "pageCacheHitRatio": 0.0,
+                                  "pageCacheHits": 0
+                                }
+                              ],
+                              "dbHits": 27380,
+                              "identifiers": [
+                                "anon_2",
+                                "headphones",
+                                "o",
+                                "anon_0",
+                                "anon_1"
+                              ],
+                              "operatorType": "Expand(All)@neo4j",
+                              "rows": 24880,
+                              "pageCacheHitRatio": 0.0,
+                              "pageCacheHits": 0
+                            }
+                          ],
+                          "dbHits": 48766,
+                          "identifiers": [
+                            "anon_2",
+                            "headphones",
+                            "o",
+                            "anon_0",
+                            "anon_1"
+                          ],
+                          "operatorType": "Filter@neo4j",
+                          "rows": 23886,
+                          "pageCacheHitRatio": 0.0,
+                          "pageCacheHits": 0
+                        }
+                      ],
+                      "dbHits": 0,
+                      "identifiers": [
+                        "o",
+                        "headphones"
+                      ],
+                      "operatorType": "Distinct@neo4j",
+                      "rows": 23886,
+                      "pageCacheHitRatio": 0.0,
+                      "pageCacheHits": 0
+                    }
+                  ],
+                  "dbHits": 103625,
+                  "identifiers": [
+                    "o",
+                    "headphones",
+                    "anon_3",
+                    "other"
+                  ],
+                  "operatorType": "Expand(All)@neo4j",
+                  "rows": 55853,
+                  "pageCacheHitRatio": 0.0,
+                  "pageCacheHits": 0
+                }
+              ],
+              "dbHits": 87820,
+              "identifiers": [
+                "o",
+                "headphones",
+                "anon_3",
+                "other"
+              ],
+              "operatorType": "Filter@neo4j",
+              "rows": 31967,
+              "pageCacheHitRatio": 0.0,
+              "pageCacheHits": 0
+            }
+          ],
+          "dbHits": 31967,
+          "identifiers": [
+            "product_id",
+            "name",
+            "orders_together"
+          ],
+          "operatorType": "EagerAggregation@neo4j",
+          "rows": 4990,
+          "pageCacheHitRatio": 0.0,
+          "pageCacheHits": 0
+        }
+      ],
+      "dbHits": 0,
+      "identifiers": [
+        "product_id",
+        "name",
+        "orders_together"
+      ],
+      "operatorType": "Top@neo4j",
+      "rows": 3,
+      "pageCacheHitRatio": 0.0,
+      "pageCacheHits": 0
+    }
+  ],
+  "dbHits": 0,
+  "identifiers": [
+    "product_id",
+    "name",
+    "orders_together"
+  ],
+  "operatorType": "ProduceResults@neo4j",
+  "rows": 3,
+  "pageCacheHitRatio": 0.0,
+  "pageCacheHits": 0
+}
 ```
 
 </details>
 
 ### Query 13: Days since last purchase and order count, per user
 
-MySQL only. `users` is fully scanned (about 10,000 rows) because the solution needs every user. Each user's orders come from `idx_orders_user_date` and we filter out cancelled orders.
+MySQL left joins every user to all orders. COUNT includes all orders, while a conditional MAX excludes cancellations only from the last-purchase date.
 
 <details>
-<summary>Raw MySQL EXPLAIN</summary>
+<summary>Results: 10,000 records; first three records shown.</summary>
+
+```json
+[
+  {
+    "user_id": 1,
+    "full_name": "Sarah",
+    "total_orders": 13,
+    "days_since_last_purchase": 9
+  },
+  {
+    "user_id": 2,
+    "full_name": "Michelle Miles",
+    "total_orders": 11,
+    "days_since_last_purchase": 23
+  },
+  {
+    "user_id": 3,
+    "full_name": "Monica Herrera",
+    "total_orders": 8,
+    "days_since_last_purchase": 32
+  }
+]
+```
+
+</details>
+
+<details>
+<summary>MySQL query and execution plan</summary>
 
 ```sql
-EXPLAIN SELECT u.user_id, u.full_name, COUNT(o.order_id) AS total_orders, DATEDIFF(NOW(), MAX(o.placed_at)) AS days_since_last_purchase FROM users u LEFT JOIN orders o ON o.user_id = u.user_id AND o.status <> 'cancelled' GROUP BY u.user_id, u.full_name ORDER BY u.user_id;
+SELECT u.user_id, u.full_name,
+            COUNT(o.order_id) AS total_orders,
+            DATEDIFF(NOW(), MAX(CASE WHEN o.status <> 'cancelled'
+                THEN o.placed_at END)) AS days_since_last_purchase
+        FROM users u
+        LEFT JOIN orders o ON o.user_id = u.user_id
+        GROUP BY u.user_id, u.full_name
+        ORDER BY u.user_id
 ```
 
-```
-+----+-------------+-------+------------+------+----------------------------------------+----------------------+---------+---------------------+-------+----------+---------------------------------+
-| id | select_type | table | partitions | type | possible_keys                          | key                  | key_len | ref                 | rows  | filtered | Extra                           |
-+----+-------------+-------+------------+------+----------------------------------------+----------------------+---------+---------------------+-------+----------+---------------------------------+
-|  1 | SIMPLE      | u     | NULL       | ALL  | NULL                                   | NULL                 | NULL    | NULL                | 10015 |   100.00 | Using temporary; Using filesort |
-|  1 | SIMPLE      | o     | NULL       | ref  | idx_orders_user_date,idx_orders_status | idx_orders_user_date | 8       | ecommerce.u.user_id |    10 |   100.00 | Using where                     |
-+----+-------------+-------+------------+------+----------------------------------------+----------------------+---------+---------------------+-------+----------+---------------------------------+
+```json
+[
+  {
+    "id": 1,
+    "select_type": "SIMPLE",
+    "table": "u",
+    "partitions": null,
+    "type": "ALL",
+    "possible_keys": null,
+    "key": null,
+    "key_len": null,
+    "ref": null,
+    "rows": 9508,
+    "filtered": 100.0,
+    "Extra": "Using temporary; Using filesort"
+  },
+  {
+    "id": 1,
+    "select_type": "SIMPLE",
+    "table": "o",
+    "partitions": null,
+    "type": "ref",
+    "possible_keys": "idx_orders_user_date",
+    "key": "idx_orders_user_date",
+    "key_len": "8",
+    "ref": "ecommerce.u.user_id",
+    "rows": 9,
+    "filtered": 100.0,
+    "Extra": null
+  }
+]
 ```
 
 </details>
